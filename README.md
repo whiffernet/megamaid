@@ -22,7 +22,7 @@ No servers. No vector stores. No phoning home. Just files.
 
 > _"Use the sitemap, Lone Starr. Use the sitemap."_
 
-Eight target-shape playbooks, each with examples and gotchas:
+Nine target-shape playbooks, each with examples and gotchas:
 
 | Pattern              | When to use                                     |
 | -------------------- | ----------------------------------------------- |
@@ -31,6 +31,7 @@ Eight target-shape playbooks, each with examples and gotchas:
 | `sitemap_crawl`      | `sitemap.xml` covers your target URLs           |
 | `load_more_infinite` | "Load more" buttons or infinite scroll          |
 | `pdf_downloads`      | PDFs linked from an index page                  |
+| `rest_json_api`      | Site has a JSON API behind the UI (skip HTML)   |
 | `spa_hydration`      | JS-rendered SPAs (React, Vue, Next.js)          |
 | `auth_wall`          | Content behind a login (manual session capture) |
 | `image_downloads`    | Product photos, galleries, visual assets        |

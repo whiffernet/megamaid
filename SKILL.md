@@ -82,6 +82,7 @@ Before writing a line of parser code, survey the target:
    | Numbered pagination (`?page=2`, `/page/2/`)     | `paginated_html.md`     |
    | "Load more" button or infinite scroll           | `load_more_infinite.md` |
    | Content lives in PDFs linked from an index page | `pdf_downloads.md`      |
+   | DevTools shows JSON API behind the UI           | `rest_json_api.md`      |
    | Page blank until JS runs (React/Vue/Next.js)    | `spa_hydration.md`      |
    | 401/login wall                                  | `auth_wall.md`          |
    | User wants product images, galleries, or assets | `image_downloads.md`    |
@@ -183,7 +184,8 @@ megamaid/
 │   ├── pdf_downloads.md
 │   ├── spa_hydration.md
 │   ├── auth_wall.md
-│   └── image_downloads.md
+│   ├── image_downloads.md
+│   └── rest_json_api.md
 └── references/
     ├── recon.md                     # surveying an unknown target
     ├── etiquette.md                 # robots.txt, rate limits, ToS

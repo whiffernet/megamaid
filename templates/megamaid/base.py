@@ -89,6 +89,73 @@ class BaseScraper(ABC):
         finally:
             await page.close()
 
+    async def _rate_limit(self) -> None:
+        """Wait to honor rate_limit_seconds between requests.
+
+        Can be called from any async context — does not require a
+        Playwright page. Useful for targets that call APIs directly
+        via httpx instead of navigating with Playwright. Updates
+        ``_last_request_time`` after the wait so the next call
+        measures from the right point.
+        """
+        now = asyncio.get_event_loop().time()
+        elapsed = now - self._last_request_time
+        if elapsed < self.rate_limit_seconds:
+            await asyncio.sleep(self.rate_limit_seconds - elapsed)
+        self._last_request_time = asyncio.get_event_loop().time()
+
+    async def _fetch_json(
+        self,
+        client: "httpx.AsyncClient",
+        url: str,
+        retries: int = 3,
+    ) -> dict | list | None:
+        """Fetch a JSON endpoint with rate limiting and retry.
+
+        Convenience method for REST/JSON API targets that use httpx
+        instead of Playwright. Handles rate limiting, retries with
+        exponential backoff, and Retry-After headers.
+
+        Args:
+            client: An httpx.AsyncClient instance.
+            url: URL to fetch.
+            retries: Number of retry attempts.
+
+        Returns:
+            Parsed JSON (dict or list), or None if all retries fail.
+        """
+        import httpx as _httpx
+
+        for attempt in range(retries):
+            await self._rate_limit()
+            try:
+                resp = await client.get(url, timeout=30.0)
+                if resp.status_code == 429:
+                    retry_after = int(resp.headers.get("Retry-After", 2**attempt))
+                    logger.warning(
+                        f"[{self.target_name}] Rate limited (429), "
+                        f"waiting {retry_after}s"
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except _httpx.HTTPStatusError as e:
+                logger.warning(
+                    f"[{self.target_name}] HTTP {e.response.status_code} "
+                    f"on attempt {attempt + 1}/{retries} for {url[:80]}"
+                )
+                if attempt < retries - 1:
+                    await asyncio.sleep(2**attempt)
+            except Exception as e:
+                logger.warning(
+                    f"[{self.target_name}] Fetch attempt {attempt + 1}/{retries} "
+                    f"failed for {url[:80]}: {e}"
+                )
+                if attempt < retries - 1:
+                    await asyncio.sleep(2**attempt)
+        return None
+
     async def _navigate(self, page: Page, url: str, retries: int = 3) -> None:
         """Navigate to a URL with rate limiting and retry logic.
 
@@ -100,10 +167,7 @@ class BaseScraper(ABC):
         Raises:
             Exception: If all retries fail. Last error is re-raised.
         """
-        now = asyncio.get_event_loop().time()
-        elapsed = now - self._last_request_time
-        if elapsed < self.rate_limit_seconds:
-            await asyncio.sleep(self.rate_limit_seconds - elapsed)
+        await self._rate_limit()
 
         last_error: Exception | None = None
         for attempt in range(retries):
