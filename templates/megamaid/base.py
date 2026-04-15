@@ -1,0 +1,181 @@
+"""Abstract base scraper with rate limiting, retry, and screenshot-on-error.
+
+All target scrapers inherit from BaseScraper and implement the single
+scrape() method. The base class handles everything else: browser setup,
+polite rate limiting, exponential-backoff retries, and debug screenshots
+when something goes sideways.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from pathlib import Path
+
+from playwright.async_api import Browser, Page, async_playwright
+
+from .models import ScrapedDoc
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_USER_AGENT = (
+    "megamaid/0.1 (+https://github.com/whiffernet/megamaid) "
+    "Mozilla/5.0 (compatible; Chromium/131)"
+)
+
+
+class BaseScraper(ABC):
+    """Abstract base class for target scrapers.
+
+    Provides rate limiting, retry logic, screenshot-on-error, and a
+    consistent interface for all target implementations.
+
+    Attributes:
+        target_name: Short identifier for this target (e.g. "books_toscrape").
+        base_url: Root URL for the target website.
+        rate_limit_seconds: Minimum delay between page navigations.
+        user_agent: User-Agent header sent on every request.
+    """
+
+    target_name: str = ""
+    base_url: str = ""
+    rate_limit_seconds: float = 2.0
+    user_agent: str = DEFAULT_USER_AGENT
+
+    # Image download configuration (opt-in per target)
+    download_images: bool = False
+    image_max_bytes: int = 10 * 1024 * 1024  # 10 MB per image
+    image_min_bytes: int = 1024  # 1 KB — skip placeholder responses
+    image_max_per_doc: int = 50
+    image_min_width: int = 100  # skip tracking pixels and swatches
+    image_concurrency: int = 8
+
+    def __init__(self, debug_dir: Path | None = None) -> None:
+        """Initialize the scraper.
+
+        Args:
+            debug_dir: Directory for error screenshots. None disables screenshots.
+        """
+        self._debug_dir = debug_dir
+        self._last_request_time: float = 0.0
+        if self._debug_dir:
+            self._debug_dir.mkdir(parents=True, exist_ok=True)
+
+    async def run(
+        self, browser: Browser, max_items: int | None = None
+    ) -> list[ScrapedDoc]:
+        """Scrape all documents from this target.
+
+        Args:
+            browser: A Playwright browser instance.
+            max_items: Optional cap for dry-runs.
+
+        Returns:
+            List of scraped documents.
+        """
+        page = await browser.new_page()
+        page.set_default_timeout(30000)
+        await page.set_extra_http_headers({"User-Agent": self.user_agent})
+
+        try:
+            docs = await self.scrape(page, max_items=max_items)
+            logger.info(f"[{self.target_name}] Scraped {len(docs)} documents")
+            return docs
+        except Exception:
+            logger.exception(f"[{self.target_name}] Scrape failed")
+            raise
+        finally:
+            await page.close()
+
+    async def _navigate(self, page: Page, url: str, retries: int = 3) -> None:
+        """Navigate to a URL with rate limiting and retry logic.
+
+        Args:
+            page: Playwright page instance.
+            url: URL to navigate to.
+            retries: Number of retry attempts on failure.
+
+        Raises:
+            Exception: If all retries fail. Last error is re-raised.
+        """
+        now = asyncio.get_event_loop().time()
+        elapsed = now - self._last_request_time
+        if elapsed < self.rate_limit_seconds:
+            await asyncio.sleep(self.rate_limit_seconds - elapsed)
+
+        last_error: Exception | None = None
+        for attempt in range(retries):
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                self._last_request_time = asyncio.get_event_loop().time()
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"[{self.target_name}] Navigate attempt {attempt + 1}/{retries} "
+                    f"failed for {url}: {e}"
+                )
+                if attempt < retries - 1:
+                    await asyncio.sleep(2**attempt)
+
+        await self._screenshot_on_error(page, url)
+        assert last_error is not None
+        raise last_error
+
+    async def _screenshot_on_error(self, page: Page, context: str) -> None:
+        """Save a screenshot for debugging when an error occurs.
+
+        Args:
+            page: Playwright page instance.
+            context: Description of what was being attempted (used in filename).
+        """
+        if not self._debug_dir:
+            return
+        try:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            safe_ctx = context.replace("/", "_").replace(":", "")[:80]
+            path = self._debug_dir / f"{self.target_name}_{ts}_{safe_ctx}.png"
+            await page.screenshot(path=str(path), full_page=True)
+            logger.info(f"[{self.target_name}] Error screenshot saved: {path}")
+        except Exception:
+            logger.warning(f"[{self.target_name}] Failed to save error screenshot")
+
+    @abstractmethod
+    async def scrape(
+        self, page: Page, max_items: int | None = None
+    ) -> list[ScrapedDoc]:
+        """Scrape all documents from the target.
+
+        Implementations are responsible for:
+        - URL discovery (sitemap, pagination, load-more, JSON API, etc.)
+        - Per-page parsing into ScrapedDoc models
+        - Honoring max_items for dry-runs
+
+        Use self._navigate(page, url) for every page load — it handles
+        rate limiting and retries.
+
+        Args:
+            page: Playwright page instance.
+            max_items: Optional cap on number of documents to return.
+
+        Returns:
+            List of ScrapedDoc models.
+        """
+        raise NotImplementedError
+
+
+async def create_browser() -> tuple:
+    """Launch a headless Chromium browser.
+
+    Returns:
+        Tuple of (playwright_instance, browser). Caller is responsible
+        for calling await browser.close() and await pw.stop().
+    """
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(
+        headless=True,
+        args=["--no-sandbox", "--disable-gpu"],
+    )
+    return pw, browser
