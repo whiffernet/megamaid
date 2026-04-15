@@ -141,6 +141,16 @@ same command — completed items are skipped via identity hash. Use
 `megamaid status` to see run state and `megamaid diff` to see what
 changed since last run.
 
+### 7. Export (optional)
+
+```bash
+megamaid export --format csv     # CSV with flattened metadata
+megamaid export --format jsonl   # one JSON doc per line
+megamaid export --format json    # consolidated JSON array
+```
+
+Reads from the latest completed run. No re-scraping.
+
 ## Non-Negotiables
 
 These are not suggestions.

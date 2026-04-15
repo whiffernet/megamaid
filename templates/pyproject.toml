@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.5",
     "click>=8.1",
     "httpx>=0.27",
+    "trafilatura>=2.0",
 ]
 
 [project.scripts]

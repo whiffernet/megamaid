@@ -43,6 +43,8 @@ megamaid suck --max 5          # dry-run: 5 items
 megamaid suck                  # full run, resumable on crash
 megamaid status                # show latest run summary
 megamaid diff                  # new / changed / unchanged vs. last run
+megamaid export --format csv   # export as CSV, JSONL, or JSON
+megamaid map https://example.com  # discover all URLs on a domain
 megamaid suck --ignore-robots  # only if you have written permission
 ```
 

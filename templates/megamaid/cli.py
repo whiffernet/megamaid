@@ -175,6 +175,19 @@ def suck(max_items: int | None, ignore_robots: bool, staging: Path) -> None:
             await browser.close()
             await pw.stop()
 
+        # Post-process: clean content if opted in
+        if target.clean_content:
+            from trafilatura import extract as _traf_extract
+
+            for doc in docs:
+                if doc.raw_path:
+                    raw_file = run_dir / doc.raw_path
+                    if raw_file.exists():
+                        html = raw_file.read_text(errors="replace")
+                        cleaned = _traf_extract(html, output_format="markdown")
+                        if cleaned:
+                            doc.content_md = cleaned
+
         for doc in docs:
             if not doc.id:
                 doc.id = slug_from_url(doc.source_url)
@@ -256,6 +269,210 @@ def diff(staging: Path) -> None:
                 click.echo(f"    - {name}")
             if len(buckets.get(k, [])) > 10:
                 click.echo(f"    ... and {len(buckets[k]) - 10} more")
+
+
+@cli.command(name="export")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["csv", "jsonl", "json"]),
+    default="jsonl",
+    help="Output format (default: jsonl).",
+)
+@click.option(
+    "--run", "run_id", default=None, help="Specific run ID (default: latest)."
+)
+@click.option("--staging", type=click.Path(path_type=Path), default=STAGING_DIR)
+def export_cmd(fmt: str, run_id: str | None, staging: Path) -> None:
+    """Export scraped docs as CSV, JSONL, or consolidated JSON."""
+    import csv
+    import io
+
+    if not staging.exists():
+        click.echo("No staging directory yet. Run `megamaid suck` first.")
+        return
+
+    for target_dir in sorted(staging.iterdir()):
+        if not target_dir.is_dir():
+            continue
+        if run_id:
+            run_dir = target_dir / run_id
+            if not run_dir.exists():
+                continue
+        else:
+            manifest = get_latest_manifest(staging, target_dir.name)
+            if manifest is None:
+                continue
+            run_dir = target_dir / manifest.run_id
+
+        docs_dir = run_dir / "docs"
+        if not docs_dir.exists():
+            continue
+
+        docs = []
+        for doc_file in sorted(docs_dir.glob("*.json")):
+            docs.append(json.loads(doc_file.read_text()))
+
+        if not docs:
+            continue
+
+        out_path = run_dir / f"export.{fmt}"
+
+        if fmt == "jsonl":
+            lines = [json.dumps(d, ensure_ascii=False) for d in docs]
+            out_path.write_text("\n".join(lines) + "\n")
+
+        elif fmt == "json":
+            out_path.write_text(json.dumps(docs, indent=2, ensure_ascii=False))
+
+        elif fmt == "csv":
+            # Flatten: core fields + metadata keys as columns
+            all_meta_keys: set[str] = set()
+            for d in docs:
+                all_meta_keys.update(d.get("metadata", {}).keys())
+            meta_keys = sorted(all_meta_keys)
+
+            fieldnames = ["id", "source_url", "title", "content_md"] + meta_keys
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for d in docs:
+                row = {
+                    "id": d.get("id", ""),
+                    "source_url": d.get("source_url", ""),
+                    "title": d.get("title", ""),
+                    "content_md": d.get("content_md", ""),
+                }
+                for k in meta_keys:
+                    val = d.get("metadata", {}).get(k, "")
+                    row[k] = json.dumps(val) if isinstance(val, (list, dict)) else val
+                writer.writerow(row)
+            out_path.write_text(buf.getvalue())
+
+        click.echo(f"Exported {len(docs)} docs to {out_path}")
+
+
+@cli.command()
+@click.argument("url")
+@click.option("--max", "max_urls", type=int, default=500, help="Max URLs to discover.")
+@click.option(
+    "--filter", "url_filter", default=None, help="Only URLs containing this substring."
+)
+@click.option("--output", "output_file", type=click.Path(path_type=Path), default=None)
+def map(
+    url: str, max_urls: int, url_filter: str | None, output_file: Path | None
+) -> None:
+    """Discover all URLs on a domain (sitemap + link crawl)."""
+    from xml.etree import ElementTree as ET
+
+    import httpx
+
+    parsed = urlparse(url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    urls: set[str] = set()
+
+    # Layer 1: Try sitemap.xml
+    sitemap_urls_to_check = [f"{base}/sitemap.xml", f"{base}/sitemap_index.xml"]
+
+    # Check robots.txt for Sitemap: entries
+    try:
+        robots = httpx.get(f"{base}/robots.txt", timeout=10.0, follow_redirects=True)
+        if robots.status_code == 200:
+            for line in robots.text.splitlines():
+                if line.strip().lower().startswith("sitemap:"):
+                    sm_url = line.split(":", 1)[1].strip()
+                    if sm_url not in sitemap_urls_to_check:
+                        sitemap_urls_to_check.append(sm_url)
+    except Exception:
+        pass
+
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+    def _parse_sitemap(sm_url: str) -> None:
+        try:
+            resp = httpx.get(sm_url, timeout=15.0, follow_redirects=True)
+            if resp.status_code != 200:
+                return
+            root = ET.fromstring(resp.text)
+            tag = root.tag.split("}", 1)[-1]
+            if tag == "sitemapindex":
+                for sm in root.findall("sm:sitemap", ns):
+                    loc = sm.findtext("sm:loc", default="", namespaces=ns)
+                    if loc:
+                        _parse_sitemap(loc)
+            else:
+                for u in root.findall("sm:url", ns):
+                    loc = u.findtext("sm:loc", default="", namespaces=ns)
+                    if loc:
+                        urls.add(loc)
+        except Exception:
+            pass
+
+    for sm_url in sitemap_urls_to_check:
+        _parse_sitemap(sm_url)
+        if len(urls) >= max_urls:
+            break
+
+    sitemap_count = len(urls)
+    if sitemap_count:
+        logger.info(f"Sitemap: found {sitemap_count} URLs")
+
+    # Layer 2: If sitemap yielded few/no results, crawl links
+    if len(urls) < max_urls:
+        logger.info("Crawling links from start URL...")
+
+        async def _crawl_links() -> None:
+            from playwright.async_api import async_playwright
+
+            pw = await async_playwright().start()
+            browser = await pw.chromium.launch(
+                headless=True, args=["--no-sandbox", "--disable-gpu"]
+            )
+            page = await browser.new_page()
+            to_visit = [url]
+            visited: set[str] = set()
+
+            while to_visit and len(urls) < max_urls:
+                current = to_visit.pop(0)
+                if current in visited:
+                    continue
+                visited.add(current)
+                try:
+                    await page.goto(
+                        current, wait_until="domcontentloaded", timeout=15000
+                    )
+                    links = await page.eval_on_selector_all(
+                        "a[href]", "els => els.map(e => e.href)"
+                    )
+                    for link in links:
+                        link_parsed = urlparse(link)
+                        if link_parsed.netloc == parsed.netloc and link not in visited:
+                            urls.add(link.split("#")[0].rstrip("/"))
+                            if len(urls) < max_urls and link not in visited:
+                                to_visit.append(link)
+                except Exception:
+                    continue
+
+            await browser.close()
+            await pw.stop()
+
+        asyncio.run(_crawl_links())
+        logger.info(f"Link crawl: found {len(urls) - sitemap_count} additional URLs")
+
+    # Filter
+    if url_filter:
+        urls = {u for u in urls if url_filter in u}
+
+    sorted_urls = sorted(urls)[:max_urls]
+
+    # Output
+    output = "\n".join(sorted_urls) + "\n"
+    if output_file:
+        output_file.write_text(output)
+        click.echo(f"Wrote {len(sorted_urls)} URLs to {output_file}")
+    else:
+        click.echo(output, nl=False)
+        click.echo(f"\n# {len(sorted_urls)} URLs discovered", err=True)
 
 
 @cli.command()

@@ -44,6 +44,9 @@ class BaseScraper(ABC):
     rate_limit_seconds: float = 2.0
     user_agent: str = DEFAULT_USER_AGENT
 
+    # Content cleaning (opt-in per target)
+    clean_content: bool = False  # strip nav/ads/boilerplate from content_md
+
     # Image download configuration (opt-in per target)
     download_images: bool = False
     image_max_bytes: int = 10 * 1024 * 1024  # 10 MB per image
@@ -51,6 +54,9 @@ class BaseScraper(ABC):
     image_max_per_doc: int = 50
     image_min_width: int = 100  # skip tracking pixels and swatches
     image_concurrency: int = 8
+
+    # Cookie consent dismissal (enabled by default)
+    dismiss_consent: bool = True
 
     def __init__(self, debug_dir: Path | None = None) -> None:
         """Initialize the scraper.
@@ -60,6 +66,7 @@ class BaseScraper(ABC):
         """
         self._debug_dir = debug_dir
         self._last_request_time: float = 0.0
+        self._consent_dismissed: bool = False
         if self._debug_dir:
             self._debug_dir.mkdir(parents=True, exist_ok=True)
 
@@ -174,6 +181,9 @@ class BaseScraper(ABC):
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 self._last_request_time = asyncio.get_event_loop().time()
+                if self.dismiss_consent and not self._consent_dismissed:
+                    await self._dismiss_consent(page)
+                    self._consent_dismissed = True
                 return
             except Exception as e:
                 last_error = e
@@ -187,6 +197,42 @@ class BaseScraper(ABC):
         await self._screenshot_on_error(page, url)
         assert last_error is not None
         raise last_error
+
+    async def _dismiss_consent(self, page: Page) -> None:
+        """Attempt to dismiss cookie consent banners. Fails silently.
+
+        Uses a single combined selector to find any visible accept button
+        from major consent management platforms (OneTrust, Cookiebot,
+        Osano, generic patterns). Gives up after 2 seconds total if no
+        banner is found — does not add latency for sites without banners.
+        """
+        combined = ", ".join(
+            [
+                "#onetrust-accept-btn-handler",
+                "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+                ".cc-compliance .cc-btn",
+                '[data-testid="cookie-policy-manage-dialog-btn-accept"]',
+            ]
+        )
+        try:
+            btn = await page.wait_for_selector(combined, timeout=2000)
+            if btn and await btn.is_visible():
+                await btn.click()
+                logger.info(f"[{self.target_name}] Dismissed consent banner")
+                return
+        except Exception:
+            pass
+
+        # Fallback: text-based selectors (can't combine with CSS selectors)
+        for text in ("Accept All", "Accept", "I agree", "Got it"):
+            try:
+                btn = page.get_by_text(text, exact=True).first
+                if await btn.is_visible():
+                    await btn.click()
+                    logger.info(f"[{self.target_name}] Dismissed consent banner")
+                    return
+            except Exception:
+                continue
 
     async def _screenshot_on_error(self, page: Page, context: str) -> None:
         """Save a screenshot for debugging when an error occurs.
