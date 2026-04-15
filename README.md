@@ -1,14 +1,16 @@
 # megamaid
 
-> _"She's gone from suck... to blow!"_
+> _"Suck... suck... suck... suck... ah, there it is. Begin operation schlepp-content."_
 >
-> We only do the first part.
+> — President Skroob, probably
 
 **megamaid** is a [Claude Code](https://claude.ai/claude-code) skill that scaffolds polite, resumable web scrapers. Point it at a URL, and it stands up a self-contained Python project that vacuums content into local files — raw HTML/JSON, normalized Markdown, and optionally images — with rate limiting, retry logic, and crash-resumable manifest tracking.
 
 No servers. No vector stores. No phoning home. Just files.
 
 ## What it does
+
+> _"Colonel Sandurz, we scanned the planet. It's all there."_
 
 1. **Recons the target** — checks `robots.txt`, detects the site's framework (Shopify, Next.js, WordPress, static HTML), and classifies it into a scraping pattern.
 2. **Scaffolds a project** — copies a working Python project with `BaseScraper`, manifest tracking, delta detection, and a CLI (`megamaid suck / status / diff / init`).
@@ -17,6 +19,8 @@ No servers. No vector stores. No phoning home. Just files.
 5. **Full run** — manifest-tracked, crash-resumable, with identity-hash delta detection on subsequent runs.
 
 ## Patterns
+
+> _"Use the sitemap, Lone Starr. Use the sitemap."_
 
 Eight target-shape playbooks, each with examples and gotchas:
 
@@ -53,6 +57,12 @@ staging/<target>/<run_id>/
 - No CAPTCHA bypass. No proxy rotation. No fingerprint evasion baked in.
 - No scraping behind auth without user-provided credentials.
 
+## Troubleshooting
+
+> _"The radar's been jammed."_ _"Jammed? With what?"_ _"Raspberry jam, sir."_
+
+Most scraper bugs are the equivalent of raspberry jam. See `references/troubleshooting.md` for selector drift, timeouts, blocks, and the stealth workaround for anti-bot CDNs.
+
 ## Installation
 
 Copy this repo into your Claude Code skills directory:
@@ -64,6 +74,8 @@ git clone git@github.com:whiffernet/megamaid.git ~/.claude/skills/megamaid
 The skill is auto-discovered by Claude Code via `SKILL.md`. Ask Claude to "scrape a website" or "build a scraper for X" and it will invoke megamaid.
 
 ## Requirements
+
+> _"Ludicrous speed? No, no, no — regular speed. We're dry-running."_
 
 Scaffolded projects need:
 

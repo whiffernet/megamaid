@@ -1,8 +1,8 @@
 # megamaid-scraper
 
-> _"She's gone from suck... to blow!"_
+> _"Suck... suck... suck... suck... ah, there it is."_
 >
-> We only do the first part.
+> — President Skroob, probably
 
 Scaffolded by the [`megamaid`](https://github.com/whiffernet/megamaid) Claude Code skill. This is a standalone Python project — it does not need the skill to run, only to regenerate targets.
 
