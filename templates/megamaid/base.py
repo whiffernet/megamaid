@@ -50,7 +50,8 @@ class BaseScraper(ABC):
     # Image download configuration (opt-in per target)
     download_images: bool = False
     image_max_bytes: int = 10 * 1024 * 1024  # 10 MB per image
-    image_min_bytes: int = 1024  # 1 KB — skip placeholder responses
+    image_min_bytes: int = 1024  # 1 KB — skip empty placeholder responses
+    image_prefer_resolution: str = "largest"  # "largest", "smallest", or e.g. "1080"
     image_max_per_doc: int = 50
     image_min_width: int = 100  # skip tracking pixels and swatches
     image_concurrency: int = 8

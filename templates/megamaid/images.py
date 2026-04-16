@@ -46,6 +46,11 @@ TRACKING_DOMAINS = {
     "onetrust.com",
 }
 
+# CDN size parameter names used for resolution grouping.
+# When the same base image appears at multiple sizes, these params
+# are used to identify the resolution and pick the best variant.
+CDN_SIZE_PARAMS = {"wid", "hei", "w", "h", "width", "height", "size"}
+
 
 @dataclass
 class ImageCandidate:
@@ -70,6 +75,91 @@ def _is_tracking_pixel(url: str) -> bool:
     """Check if a URL belongs to a known tracking/analytics domain."""
     lower = url.lower()
     return any(d in lower for d in TRACKING_DOMAINS)
+
+
+def _get_base_path(url: str) -> str:
+    """Extract the base image path from a CDN URL, stripping query params.
+
+    Used to group the same image served at different resolutions.
+    """
+    return urlparse(url).path
+
+
+def _get_size_from_url(url: str) -> int:
+    """Extract the largest size parameter value from a CDN URL.
+
+    Looks for common CDN size params (wid, hei, w, h, width, height, size).
+    Returns 0 if no size param found.
+    """
+    from urllib.parse import parse_qs
+
+    qs = parse_qs(urlparse(url).query)
+    max_size = 0
+    for param in CDN_SIZE_PARAMS:
+        vals = qs.get(param, [])
+        for v in vals:
+            try:
+                max_size = max(max_size, int(v))
+            except (ValueError, TypeError):
+                continue
+    return max_size
+
+
+def _dedup_by_resolution(
+    candidates: list[ImageCandidate],
+    prefer: str = "largest",
+) -> list[ImageCandidate]:
+    """Group images by base path and keep only the preferred resolution.
+
+    When the same image appears at multiple CDN sizes (e.g. wid=72 and
+    wid=1080), this function keeps only one variant per base image.
+
+    Args:
+        candidates: Image candidates, possibly containing duplicates at
+            different resolutions.
+        prefer: Resolution strategy:
+            - ``"largest"`` — keep the highest-resolution variant (default)
+            - ``"smallest"`` — keep the lowest-resolution variant
+            - A numeric string like ``"1080"`` — keep the variant closest
+              to this width
+
+    Returns:
+        Deduplicated list with one candidate per base image.
+    """
+    from collections import defaultdict
+
+    # Group by base path
+    groups: dict[str, list[ImageCandidate]] = defaultdict(list)
+    for c in candidates:
+        base = _get_base_path(c.url)
+        groups[base].append(c)
+
+    result = []
+    for base, variants in groups.items():
+        if len(variants) == 1:
+            result.append(variants[0])
+            continue
+
+        # Multiple variants — pick based on strategy
+        sized = [(c, _get_size_from_url(c.url)) for c in variants]
+
+        if prefer == "largest":
+            best = max(sized, key=lambda x: x[1])
+        elif prefer == "smallest":
+            # Among variants with a size > 0, pick smallest; fallback to first
+            with_size = [(c, s) for c, s in sized if s > 0]
+            best = min(with_size, key=lambda x: x[1]) if with_size else sized[0]
+        else:
+            # Numeric target — pick closest to the target
+            try:
+                target = int(prefer)
+            except ValueError:
+                target = 1080
+            best = min(sized, key=lambda x: abs(x[1] - target))
+
+        result.append(best[0])
+
+    return result
 
 
 def _content_hash(data: bytes) -> str:
@@ -137,12 +227,17 @@ async def scroll_and_wait(page: Page, pause: float = 1.5) -> None:
 async def discover_page_images(
     page: Page,
     min_width: int = 100,
+    prefer_resolution: str = "largest",
 ) -> list[ImageCandidate]:
     """Extract image candidates from the current page DOM.
 
     Uses ``img.currentSrc`` (the browser's resolved srcset choice) rather
     than parsing srcset strings, which avoids breakage on CDN URLs that
     contain commas in query parameters.
+
+    When the same base image appears at multiple CDN sizes (e.g. wid=72
+    and wid=1080), only the preferred resolution is kept. This prevents
+    downloading both thumbnails and full-res versions of the same image.
 
     Should be called **after** ``scroll_and_wait()`` so that lazy-loaded
     images have resolved their real URLs.
@@ -151,6 +246,8 @@ async def discover_page_images(
         page: Playwright page instance (already navigated and scrolled).
         min_width: Minimum naturalWidth to include. Filters tracking pixels
             and tiny icons/swatches.
+        prefer_resolution: Resolution strategy for multi-size images.
+            ``"largest"`` (default), ``"smallest"``, or a width like ``"1080"``.
 
     Returns:
         List of ImageCandidate objects, deduplicated by URL.
@@ -221,6 +318,10 @@ async def discover_page_images(
                 source_type=item["sourceType"],
             )
         )
+
+    # Dedup: when the same base image appears at multiple CDN sizes,
+    # keep only the preferred resolution.
+    candidates = _dedup_by_resolution(candidates, prefer=prefer_resolution)
 
     return candidates
 
