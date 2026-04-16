@@ -9,10 +9,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 
 from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SitemapProduct:
+    """A product discovered from a sitemap, with optional image URLs.
+
+    Attributes:
+        url: Canonical product page URL from the sitemap <loc> tag.
+        image_urls: Image URLs extracted from <image:image> tags in the
+            same <url> entry. Empty if the sitemap has no image extensions.
+    """
+
+    url: str
+    image_urls: list[str] = field(default_factory=list)
 
 
 async def dismiss_modals(page: Page, timeout: int = 3000) -> None:
@@ -222,15 +237,28 @@ async def paginated_discovery(
 async def sitemap_discovery(
     base_url: str,
     product_patterns: list[str] | None = None,
-) -> list[str]:
+    *,
+    user_agent: str | None = None,
+    extract_images: bool = False,
+) -> list[str] | list[SitemapProduct]:
     """Discover product URLs from sitemap.xml.
+
+    Fetches the sitemap index and all child sitemaps, filtering URLs that
+    match the given product patterns. Optionally extracts ``<image:image>``
+    tags embedded in each ``<url>`` entry.
 
     Args:
         base_url: Site root URL (e.g. https://example.com).
         product_patterns: URL substrings to filter product pages.
+        user_agent: Custom User-Agent header for sitemap requests.
+            Defaults to a Chrome-like UA string if not specified.
+        extract_images: If True, also parse ``<image:image>`` tags and
+            return ``SitemapProduct`` objects instead of plain URL strings.
 
     Returns:
-        List of product URLs found in the sitemap.
+        If ``extract_images`` is False: list of product URL strings.
+        If ``extract_images`` is True: list of ``SitemapProduct`` objects
+        containing both the product URL and any image URLs from the sitemap.
     """
     import httpx
     from xml.etree import ElementTree as ET
@@ -238,13 +266,31 @@ async def sitemap_discovery(
     if product_patterns is None:
         product_patterns = ["/p/", "/product/", "/products/", "/dp/", "/ip/", "/pd/"]
 
-    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-    urls: set[str] = set()
+    if user_agent is None:
+        user_agent = (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+
+    ns = {
+        "sm": "http://www.sitemaps.org/schemas/sitemap/0.9",
+        "image": "http://www.google.com/schemas/sitemap-image/1.1",
+    }
+
+    products: list[SitemapProduct] = []
+    seen_urls: set[str] = set()
+
+    headers = {"User-Agent": user_agent}
 
     def _parse(sm_url: str) -> None:
         try:
-            resp = httpx.get(sm_url, timeout=15.0, follow_redirects=True)
+            resp = httpx.get(
+                sm_url, timeout=30.0, follow_redirects=True, headers=headers
+            )
             if resp.status_code != 200:
+                logger.warning(
+                    f"Sitemap fetch returned {resp.status_code} for {sm_url}"
+                )
                 return
             root = ET.fromstring(resp.text)
             tag = root.tag.split("}", 1)[-1]
@@ -256,14 +302,38 @@ async def sitemap_discovery(
             else:
                 for u in root.findall("sm:url", ns):
                     loc = u.findtext("sm:loc", default="", namespaces=ns)
-                    if loc and any(p in loc for p in product_patterns):
-                        urls.add(loc)
+                    if not loc or loc in seen_urls:
+                        continue
+                    if not any(p in loc for p in product_patterns):
+                        continue
+                    seen_urls.add(loc)
+
+                    image_urls: list[str] = []
+                    if extract_images:
+                        for img_el in u.findall("image:image", ns):
+                            img_loc = img_el.findtext(
+                                "image:loc", default="", namespaces=ns
+                            )
+                            if img_loc:
+                                image_urls.append(img_loc)
+
+                    products.append(SitemapProduct(url=loc, image_urls=image_urls))
         except Exception as e:
             logger.warning(f"Sitemap parse error for {sm_url}: {e}")
 
     _parse(f"{base_url}/sitemap.xml")
-    if not urls:
+    if not products:
         _parse(f"{base_url}/sitemap_index.xml")
 
-    logger.info(f"Sitemap discovery: {len(urls)} product URLs")
-    return sorted(urls)
+    logger.info(
+        f"Sitemap discovery: {len(products)} product URLs"
+        + (
+            f", {sum(len(p.image_urls) for p in products)} image URLs"
+            if extract_images
+            else ""
+        )
+    )
+
+    if extract_images:
+        return products
+    return [p.url for p in products]
