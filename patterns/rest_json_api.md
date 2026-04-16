@@ -292,6 +292,17 @@ class OpenLibrarySearch(BaseScraper):
   request, use `client.stream("GET", url)` and parse incrementally.
 - **Nested pagination.** Some APIs need two loops: outer for categories,
   inner for items within each category. Same pattern, just nested.
+- **Next-page URL missing auth.** Some APIs (e.g. Congress.gov) return a
+  `pagination.next` URL but omit the API key from it. If page 2 gets a
+  403 but page 1 worked, append the key: `next_url += f"&api_key={key}"`.
+- **Absurd Retry-After values.** Government demo keys (GovInfo, Congress.gov)
+  can return `Retry-After: 19000+` seconds (5+ hours). `_fetch_json()`
+  caps this at 30 seconds. If you hit this repeatedly, the demo key is
+  exhausted — try sitemap-based discovery or register for a real key.
+- **XML APIs exist too.** Not every API returns JSON. arXiv uses Atom
+  XML, PubMed uses JATS XML, OAI-PMH endpoints return Dublin Core XML.
+  Use `_fetch_xml()` (same rate-limit/retry as `_fetch_json()`) and
+  parse with `xml.etree.ElementTree`.
 
 ## Public test targets
 

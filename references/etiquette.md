@@ -26,6 +26,24 @@ set that they're overriding the check.
 Check `Crawl-delay: N` in `robots.txt` too. If the site specifies 10s,
 set `rate_limit_seconds = 10`.
 
+### When `robots.txt` is misleading
+
+Some official programmatic APIs have `Disallow: /` in their robots.txt
+despite being the intended way to access data. The most common example
+is NCBI E-utilities (`eutils.ncbi.nlm.nih.gov`): the API subdomain has
+a blanket Disallow, yet NCBI's own documentation tells developers to use
+it. In these cases, `--ignore-robots` is the correct flag — the
+robots.txt is aimed at web crawlers, not API consumers.
+
+Look for these signs that Disallow is misdirected:
+
+- The site publishes developer docs encouraging API use
+- The API has rate-limit headers and key registration
+- The Disallow covers the entire subdomain, not specific paths
+
+When in doubt, check the site's developer documentation rather than
+trusting robots.txt alone.
+
 ## Rate limit
 
 Default is 2.0 seconds between requests. That's the right starting

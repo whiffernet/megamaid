@@ -139,7 +139,62 @@ class BaseScraper(ABC):
             try:
                 resp = await client.get(url, timeout=30.0)
                 if resp.status_code == 429:
-                    retry_after = int(resp.headers.get("Retry-After", 2**attempt))
+                    raw = resp.headers.get("Retry-After", str(2**attempt))
+                    retry_after = min(int(raw), 30)  # cap at 30s
+                    logger.warning(
+                        f"[{self.target_name}] Rate limited (429), "
+                        f"waiting {retry_after}s (raw Retry-After: {raw})"
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except _httpx.HTTPStatusError as e:
+                logger.warning(
+                    f"[{self.target_name}] HTTP {e.response.status_code} "
+                    f"on attempt {attempt + 1}/{retries} for {url[:80]}"
+                )
+                if attempt < retries - 1:
+                    await asyncio.sleep(2**attempt)
+            except Exception as e:
+                logger.warning(
+                    f"[{self.target_name}] Fetch attempt {attempt + 1}/{retries} "
+                    f"failed for {url[:80]}: {e}"
+                )
+                if attempt < retries - 1:
+                    await asyncio.sleep(2**attempt)
+        return None
+
+    async def _fetch_xml(
+        self,
+        client: "httpx.AsyncClient",
+        url: str,
+        retries: int = 3,
+    ) -> str | None:
+        """Fetch an XML endpoint with rate limiting and retry.
+
+        Convenience method for API targets that return XML (Atom, JATS,
+        OAI-PMH, sitemap XML, etc.).  Same retry/backoff logic as
+        ``_fetch_json()`` but returns raw text for the caller to parse
+        with ``xml.etree.ElementTree`` or similar.
+
+        Args:
+            client: An httpx.AsyncClient instance.
+            url: URL to fetch.
+            retries: Number of retry attempts.
+
+        Returns:
+            Raw response text (XML), or None if all retries fail.
+        """
+        import httpx as _httpx
+
+        for attempt in range(retries):
+            await self._rate_limit()
+            try:
+                resp = await client.get(url, timeout=30.0)
+                if resp.status_code == 429:
+                    raw = resp.headers.get("Retry-After", str(2**attempt))
+                    retry_after = min(int(raw), 30)
                     logger.warning(
                         f"[{self.target_name}] Rate limited (429), "
                         f"waiting {retry_after}s"
@@ -147,7 +202,7 @@ class BaseScraper(ABC):
                     await asyncio.sleep(retry_after)
                     continue
                 resp.raise_for_status()
-                return resp.json()
+                return resp.text
             except _httpx.HTTPStatusError as e:
                 logger.warning(
                     f"[{self.target_name}] HTTP {e.response.status_code} "

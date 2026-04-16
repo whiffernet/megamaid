@@ -147,6 +147,48 @@ Also: disabling images if you don't need them.
 await page.route("**/*.{png,jpg,jpeg,gif,webp,svg}", lambda r: r.abort())
 ```
 
+## Playwright renders sitemap XML differently
+
+When you use Playwright to navigate to a sitemap XML file (because
+the site has anti-bot on even sitemaps), the browser renders it
+differently than a raw `httpx.get()` fetch:
+
+- **Duplicate entries.** The browser's XML rendering may double child
+  sitemap URLs.
+- **Tag text leaking into URLs.** `</loc>` closing tag text can end up
+  appended to parsed URLs (e.g. `https://example.com/page/</loc>/`).
+
+This happens because Playwright returns the browser's rendered DOM,
+not the raw XML text.
+
+**Fix:** Add dedup + URL sanitizer after parsing:
+
+```python
+# Deduplicate
+urls = list(dict.fromkeys(urls))
+
+# Clean tag artifacts
+urls = [re.sub(r"</?\w+>/?$", "", u).rstrip("/") for u in urls]
+```
+
+If the site doesn't require Playwright for sitemaps, prefer `httpx`
+for XML fetching — it returns the raw bytes without browser rendering.
+
+## Pagination next-URL missing auth
+
+Some APIs (e.g. Congress.gov) include a `next` URL in their pagination
+response but omit the API key from it. If your scraper gets a 403 on
+page 2 but page 1 worked fine, check whether the next-page URL
+includes your API key.
+
+**Fix:** Append the key manually:
+
+```python
+next_url = data["pagination"]["next"]
+if "api_key=" not in next_url:
+    next_url += f"&api_key={self.api_key}"
+```
+
 ## Things that are not bugs
 
 - First run reports everything as "new" — correct, no previous manifest
