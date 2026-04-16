@@ -78,20 +78,7 @@ The skill is auto-discovered by Claude Code via `SKILL.md`. Ask Claude to "scrap
 
 > _"Ludicrous speed? No, no, no — regular speed. We're dry-running."_
 
-Scaffolded projects need:
-
-- **Python 3.11+**
-- **Chromium browser** — Playwright downloads its own copy, separate from pip:
-  ```bash
-  pip install -e .               # installs playwright, bs4, pydantic, click, httpx, trafilatura
-  playwright install chromium    # downloads the Chromium binary (~150 MB)
-  ```
-
-Optional (install only if your target needs them):
-
-- `pypdf` — for the PDF downloads pattern
-- `playwright-stealth` — for anti-bot protected sites
-- `xvfb` — for stealth mode on headless Linux servers only (Mac/Windows don't need this)
+- **Python 3.11+** — everything else is installed automatically during scaffolding
 
 ## License
 
