@@ -86,6 +86,10 @@ Measured against the two biggest general-purpose open-source scraping frameworks
 
 Scrapy wins on ecosystem depth (middlewares, pipelines, distributed crawling via Scrapyd). Crawl4AI wins on LLM-native extraction and speed. megamaid wins on "I want a working scraper for this one site by the end of the afternoon, and I want it to still work next month."
 
+## Examples
+
+See [`EXAMPLES.md`](EXAMPLES.md) for three end-to-end walkthroughs: downloading product images, archiving PDFs with text extraction, and following an RSS feed to a growing local archive.
+
 ## Troubleshooting
 
 > _"The radar's been jammed."_ _"Jammed? With what?"_ _"Raspberry jam, sir."_
