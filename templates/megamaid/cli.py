@@ -117,6 +117,63 @@ def cli() -> None:
 
 
 @cli.command()
+@click.argument("url")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format (default: text).",
+)
+@click.option(
+    "--output",
+    "output_path",
+    type=click.Path(),
+    default=None,
+    help="Write JSON report to file.",
+)
+@click.option("--user-agent", default=None, help="Override User-Agent.")
+@click.option(
+    "--timeout", type=float, default=10.0, help="Per-request timeout (seconds)."
+)
+@click.option(
+    "--quiet", is_flag=True, help="Suppress progress, print only final report."
+)
+def recon(
+    url: str,
+    fmt: str,
+    output_path: str | None,
+    user_agent: str | None,
+    timeout: float,
+    quiet: bool,
+) -> None:
+    """Recon a target URL and recommend a scraping pattern.
+
+    Probes robots.txt, sitemaps, anti-bot systems, structured data, and
+    API endpoints with 3-6 HTTP requests. Outputs a pattern recommendation
+    with confidence level.
+    """
+    from .recon import run_recon, format_text_report, format_json_report
+    from .base import DEFAULT_USER_AGENT
+
+    ua = user_agent or DEFAULT_USER_AGENT
+    if not quiet:
+        click.echo(f"Recon: {url} ...", err=True)
+
+    report = asyncio.run(run_recon(url, user_agent=ua, timeout=timeout))
+
+    if fmt == "json":
+        click.echo(format_json_report(report))
+    else:
+        click.echo(format_text_report(report))
+
+    if output_path:
+        Path(output_path).write_text(format_json_report(report))
+        if not quiet:
+            click.echo(f"Report written to {output_path}", err=True)
+
+
+@cli.command()
 @click.option("--max", "max_items", type=int, default=None, help="Cap items (dry-run).")
 @click.option(
     "--ignore-robots",

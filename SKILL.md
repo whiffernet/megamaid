@@ -63,7 +63,14 @@ stop. Don't guess.
 
 > _"Colonel Sandurz, we scanned the planet. It's all there."_
 
-Before writing a line of parser code, survey the target:
+Before writing a line of parser code, survey the target. If the project
+is already scaffolded, run `megamaid recon <url>` to automate this step —
+it probes robots.txt, sitemaps, anti-bot, structured data, and API
+endpoints in 3-6 requests and recommends a pattern with a confidence
+level. If confidence is **high**, proceed with the recommended pattern.
+If **medium** or **low**, do manual recon per the instructions below.
+
+Manual recon steps (or if `megamaid recon` is not available):
 
 1. `WebFetch` on `https://<domain>/robots.txt`. Note `Disallow` entries
    and any `Crawl-delay`. If `Disallow: /` covers your target path and
