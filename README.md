@@ -12,8 +12,8 @@ No servers. No vector stores. No phoning home. Just files.
 
 > _"Colonel Sandurz, we scanned the planet. It's all there."_
 
-1. **Recons the target** — checks `robots.txt`, detects the site's framework (Shopify, Next.js, WordPress, static HTML), and classifies it into a scraping pattern.
-2. **Scaffolds a project** — copies a working Python project with `BaseScraper`, manifest tracking, delta detection, and a CLI (`megamaid suck / status / diff / init`).
+1. **Recons the target** — run `megamaid recon <url>` to probe robots.txt, sitemaps, anti-bot systems, and API markers in 3–6 requests and get a recommended pattern with confidence level.
+2. **Scaffolds a project** — copies a working Python project with `BaseScraper`, manifest tracking, delta detection, and a CLI (`megamaid recon / suck / status / diff / init`).
 3. **Writes the target class** — the only bespoke part: URL discovery and field extraction, tailored to the detected pattern.
 4. **Dry-runs** — scrapes 3–5 items so you can iterate on selectors before committing to a full run.
 5. **Full run** — manifest-tracked, crash-resumable, with identity-hash delta detection on subsequent runs.
@@ -22,7 +22,7 @@ No servers. No vector stores. No phoning home. Just files.
 
 > _"Use the sitemap, Lone Starr. Use the sitemap."_
 
-Nine target-shape playbooks, each with examples and gotchas:
+Twelve target-shape playbooks, each with examples and gotchas:
 
 | Pattern              | When to use                                     |
 | -------------------- | ----------------------------------------------- |
@@ -32,6 +32,9 @@ Nine target-shape playbooks, each with examples and gotchas:
 | `load_more_infinite` | "Load more" buttons or infinite scroll          |
 | `pdf_downloads`      | PDFs linked from an index page                  |
 | `rest_json_api`      | Site has a JSON API behind the UI (skip HTML)   |
+| `graphql_api`        | POST-to-`/graphql` with query bodies            |
+| `rss_atom_feed`      | Site publishes RSS 2.0 or Atom 1.0 feeds        |
+| `search_seed`        | No sitemap, but the search box returns results  |
 | `spa_hydration`      | JS-rendered SPAs (React, Vue, Next.js)          |
 | `auth_wall`          | Content behind a login (manual session capture) |
 | `image_downloads`    | Product photos, galleries, visual assets        |
