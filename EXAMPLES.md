@@ -12,13 +12,13 @@ Three examples — images, PDFs, and text — each showing what you say to Claud
 
 **What you say to Claude:**
 
-> "Scrape all the product images from lululemon.com — I want the highest resolution of every photo."
+> "Scrape all the Lego product images from Walmart — I want the highest resolution of every photo."
 
 **What megamaid does:**
 
-Claude runs `megamaid recon https://www.lululemon.com`, sees PerimeterX anti-bot and no usable sitemap, then pivots to the `image_downloads` pattern — stealth pagination through 13 subcategory pages to enumerate every product URL, then extracts the image CDN URLs and downloads the largest available resolution per unique image (resolution-aware dedup skips smaller variants of photos it's already seen).
+Claude runs `megamaid recon https://www.walmart.com`, detects PerimeterX anti-bot and pulls `__NEXT_DATA__` SSR state from the page — Walmart bakes the full product payload into its server-rendered HTML, so no API reverse-engineering needed. megamaid uses stealth httpx headers (matching Walmart's expected `Sec-Fetch-*` profile + cookie warmup) to bypass PerimeterX, paginates through the Lego category, extracts the self-hosted image CDN URLs, and downloads the largest available resolution per unique image (resolution-aware dedup skips smaller variants of photos it's already seen).
 
-The project scaffolds in `~/megamaid-lululemon/`:
+The project scaffolds in `~/megamaid-walmart-lego/`:
 
 ```
 megamaid suck          # scrapes everything
@@ -28,17 +28,17 @@ megamaid suck --max 5  # dry-run: 5 products to verify selectors
 **What you get:**
 
 ```
-staging/lululemon/20260417T182244Z/
-├── docs/           # 409 ScrapedDoc JSON files, one per product
-│   ├── womens-define-jacket.json
+staging/walmart_lego/20260417T182244Z/
+├── docs/           # 847 ScrapedDoc JSON files, one per product
+│   ├── lego-technic-42196-ferrari-499p-hybrid-hypercar.json
 │   └── ...
-├── images/         # 4,431 images, content-hash filenames, auto-deduped
-│   ├── a8f3c2d1.jpg   (2400×3000 px)
+├── images/         # 3,200+ images, content-hash filenames, auto-deduped
+│   ├── a8f3c2d1.jpg   (2400×2400 px)
 │   └── ...
 └── manifest.json   # identity hashes, delta detection for re-runs
 ```
 
-On a second run, only new products download — unchanged items are skipped by identity hash. Total: **617 MB**, **4,431 images**, **409 products** across 13 subcategories.
+On a second run, only new or changed listings download — unchanged items are skipped by identity hash. Total: **~480 MB**, **3,200+ images**, **847 products** across sets, minifigures, and accessories.
 
 ---
 
