@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 _SM_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 _IMG_NS = {"image": "http://www.google.com/schemas/sitemap-image/1.1"}
 
-# All 10 megamaid patterns
+# All 12 megamaid patterns
 _PATTERNS = [
     "shopify_json",
     "sitemap_crawl",
@@ -44,6 +44,9 @@ _PATTERNS = [
     "load_more_infinite",
     "pdf_downloads",
     "rest_json_api",
+    "graphql_api",
+    "rss_atom_feed",
+    "search_seed",
     "spa_hydration",
     "auth_wall",
     "image_downloads",
@@ -483,7 +486,37 @@ def probe_structured_data(html: str) -> ProbeResult:
     has_og = 'property="og:' in html or "property='og:" in html
     has_microdata = 'itemtype="http' in html
 
-    if not jsonld_types and not has_og and not has_microdata:
+    # RSS/Atom feed alternate links in <head>
+    has_rss_link = bool(
+        re.search(
+            r'<link[^>]+type=["\']application/rss\+xml["\']',
+            html,
+            re.I,
+        )
+    )
+    has_atom_link = bool(
+        re.search(
+            r'<link[^>]+type=["\']application/atom\+xml["\']',
+            html,
+            re.I,
+        )
+    )
+
+    # Search form: <form action="/search"> or <input name="q">/name="query"/name="search">
+    has_search_form = bool(
+        re.search(r'<form[^>]+action=["\'][^"\']*(?:search|/s/|/find)', html, re.I)
+        or re.search(
+            r'<input[^>]+name=["\'](?:q|query|search|keyword)["\']', html, re.I
+        )
+    )
+
+    if (
+        not jsonld_types
+        and not has_og
+        and not has_microdata
+        and not has_rss_link
+        and not has_atom_link
+    ):
         return ProbeResult(
             name="structured_data",
             status="info",
@@ -492,6 +525,9 @@ def probe_structured_data(html: str) -> ProbeResult:
                 "has_jsonld": False,
                 "has_opengraph": has_og,
                 "has_microdata": has_microdata,
+                "has_rss_link": False,
+                "has_atom_link": False,
+                "has_search_form": has_search_form,
             },
         )
 
@@ -502,6 +538,10 @@ def probe_structured_data(html: str) -> ProbeResult:
         parts.append("OpenGraph")
     if has_microdata:
         parts.append("Microdata")
+    if has_rss_link:
+        parts.append("RSS feed")
+    if has_atom_link:
+        parts.append("Atom feed")
 
     return ProbeResult(
         name="structured_data",
@@ -512,6 +552,9 @@ def probe_structured_data(html: str) -> ProbeResult:
             "jsonld_types": list(set(jsonld_types)),
             "has_opengraph": has_og,
             "has_microdata": has_microdata,
+            "has_rss_link": has_rss_link,
+            "has_atom_link": has_atom_link,
+            "has_search_form": has_search_form,
         },
     )
 
@@ -543,6 +586,15 @@ async def probe_api_endpoints(
     endpoints: list[dict] = []
     has_next_data = False
     has_nuxt_data = False
+    has_graphql = False
+
+    # GraphQL markers — Apollo client state, endpoint references
+    if "__APOLLO_STATE__" in html or "__APOLLO_CLIENT__" in html:
+        has_graphql = True
+        signals.append("__APOLLO_STATE__ (GraphQL client state)")
+    if re.search(r'["\'/](?:api/)?graphql\b', html, re.I):
+        has_graphql = True
+        signals.append("/graphql endpoint referenced in HTML")
 
     # Check HTML markers
     if "__NEXT_DATA__" in html:
@@ -620,6 +672,7 @@ async def probe_api_endpoints(
             "endpoints": endpoints,
             "has_next_data": has_next_data,
             "has_nuxt_data": has_nuxt_data,
+            "has_graphql": has_graphql,
         },
         requests_made=requests_made,
     )
@@ -729,6 +782,9 @@ def score_patterns(probes: list[ProbeResult]) -> list[PatternScore]:
         if confirmed and fw not in ("shopify", "wordpress"):
             scores["rest_json_api"] += 30
             reasons["rest_json_api"].append("JSON API endpoint confirmed (+30)")
+        if api.details.get("has_graphql"):
+            scores["graphql_api"] += 50
+            reasons["graphql_api"].append("GraphQL markers in HTML (+50)")
 
     # --- Sitemap ---
     sm = probe_map.get("sitemap")
@@ -796,6 +852,34 @@ def score_patterns(probes: list[ProbeResult]) -> list[PatternScore]:
         if types:
             scores["rest_json_api"] += 5
             reasons["rest_json_api"].append("Structured data present (+5)")
+        if sd.details.get("has_rss_link") or sd.details.get("has_atom_link"):
+            scores["rss_atom_feed"] += 60
+            reasons["rss_atom_feed"].append("Feed alternate link in <head> (+60)")
+
+    # --- Search seed (search-form fallback when discovery is blocked) ---
+    # Only boost when: search form is present AND sitemap is missing AND no
+    # API framework was detected. Without a search form this pattern does not
+    # apply, no matter how bleak the other signals look.
+    has_search_form = bool(sd and sd.details and sd.details.get("has_search_form"))
+    sm_exists = (
+        probe_map.get("sitemap")
+        and probe_map["sitemap"].details
+        and probe_map["sitemap"].details.get("exists")
+    )
+    fw_detected = (
+        probe_map.get("api_endpoints")
+        and probe_map["api_endpoints"].details
+        and probe_map["api_endpoints"].details.get("framework")
+    )
+    if has_search_form and not sm_exists and not fw_detected:
+        scores["search_seed"] += 35
+        reasons["search_seed"].append(
+            "Search form + no sitemap + no framework API (+35)"
+        )
+    elif has_search_form:
+        # Minor signal — search form exists but better patterns are also in play.
+        scores["search_seed"] += 10
+        reasons["search_seed"].append("Search form present (+10)")
 
     # --- Anti-bot ---
     ab = probe_map.get("anti_bot")

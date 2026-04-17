@@ -90,6 +90,9 @@ Manual recon steps (or if `megamaid recon` is not available):
    | "Load more" button or infinite scroll           | `load_more_infinite.md` |
    | Content lives in PDFs linked from an index page | `pdf_downloads.md`      |
    | DevTools shows JSON API behind the UI           | `rest_json_api.md`      |
+   | POST to `/graphql` with `query` body            | `graphql_api.md`        |
+   | `<link rel="alternate" type="application/rss">` | `rss_atom_feed.md`      |
+   | No sitemap but the search box works             | `search_seed.md`        |
    | Page blank until JS runs (React/Vue/Next.js)    | `spa_hydration.md`      |
    | 401/login wall                                  | `auth_wall.md`          |
    | User wants product images, galleries, or assets | `image_downloads.md`    |
@@ -202,7 +205,10 @@ megamaid/
 │   ├── spa_hydration.md
 │   ├── auth_wall.md
 │   ├── image_downloads.md
-│   └── rest_json_api.md
+│   ├── rest_json_api.md
+│   ├── graphql_api.md
+│   ├── rss_atom_feed.md
+│   └── search_seed.md
 └── references/
     ├── recon.md                     # surveying an unknown target
     ├── etiquette.md                 # robots.txt, rate limits, ToS
