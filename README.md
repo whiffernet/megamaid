@@ -58,6 +58,31 @@ staging/<target>/<run_id>/
 - No CAPTCHA bypass. No proxy rotation. No fingerprint evasion baked in.
 - No scraping behind auth without user-provided credentials.
 
+## Compared to other free scrapers
+
+> _"We're not just doing the job. We're doing it better."_
+>
+> — Lone Starr, once, probably
+
+Measured against the two biggest general-purpose open-source scraping frameworks — [Scrapy](https://github.com/scrapy/scrapy) (the Python classic, ~55k stars) and [Crawl4AI](https://github.com/unclecode/crawl4ai) (the LLM-era newcomer, ~58k stars) — megamaid is narrower in scope but opinionated about the workflow around a scrape, not just the fetch itself.
+
+| Feature                                 | megamaid | Scrapy | Crawl4AI |
+| --------------------------------------- | :------: | :----: | :------: |
+| Zero-code target scaffold (AI-written)  |    ✅    |        |          |
+| Pre-built pattern playbooks             |    ✅    |        |          |
+| Automated site recon (`megamaid recon`) |    ✅    |        |          |
+| Identity-hash delta detection           |    ✅    |        |          |
+| Crash-resumable manifest                |    ✅    |   ✅   |          |
+| Content-aware HTML → Markdown output    |    ✅    |        |    ✅    |
+| Headless browser rendering built-in     |    ✅    |        |    ✅    |
+| Image download with resolution dedup    |    ✅    |   ✅   |          |
+| robots.txt honored by default           |    ✅    |   ✅   |    ✅    |
+| Rate limiting + retry backoff           |    ✅    |   ✅   |    ✅    |
+| CLI for operations (run/status/diff)    |    ✅    |   ✅   |          |
+| Local-first output (no DB or cloud)     |    ✅    |   ✅   |    ✅    |
+
+Scrapy wins on ecosystem depth (middlewares, pipelines, distributed crawling via Scrapyd). Crawl4AI wins on LLM-native extraction and speed. megamaid wins on "I want a working scraper for this one site by the end of the afternoon, and I want it to still work next month."
+
 ## Troubleshooting
 
 > _"The radar's been jammed."_ _"Jammed? With what?"_ _"Raspberry jam, sir."_
@@ -66,10 +91,20 @@ Most scraper bugs are the equivalent of raspberry jam. See `references/troublesh
 
 ## Installation
 
+> _"One command. Even I can do it, and I'm half-dog."_
+>
+> — Barf
+
 Copy this repo into your Claude Code skills directory:
 
 ```bash
 git clone git@github.com:whiffernet/megamaid.git ~/.claude/skills/megamaid
+```
+
+Verify the skill registered:
+
+```bash
+ls ~/.claude/skills/megamaid/SKILL.md
 ```
 
 The skill is auto-discovered by Claude Code via `SKILL.md`. Ask Claude to "scrape a website" or "build a scraper for X" and it will invoke megamaid.
