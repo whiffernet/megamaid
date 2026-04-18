@@ -342,14 +342,21 @@ async def probe_sitemap(
     )
 
 
-def probe_anti_bot(resp: httpx.Response) -> ProbeResult:
+def probe_anti_bot(resp: httpx.Response, original_domain: str = "") -> ProbeResult:
     """Detect anti-bot systems from homepage response headers and body.
 
     Does NOT make additional requests — analyzes the response that was
     already fetched. Zero request cost.
 
+    Also detects challenge-subdomain redirects: if the final response URL
+    has a different host than original_domain, the site bounced us to an
+    interstitial domain (e.g. unblock.federalregister.gov) — a hard block.
+
     Args:
         resp: The homepage HTTP response.
+        original_domain: The netloc we requested (e.g. "www.example.com").
+            When supplied, the final URL host is compared and a mismatch
+            is treated as a blocking challenge redirect.
 
     Returns:
         ProbeResult with detected system and severity in details.
@@ -359,6 +366,18 @@ def probe_anti_bot(resp: httpx.Response) -> ProbeResult:
     body = resp.text[:50_000]  # only scan first 50KB
 
     detections: list[dict] = []
+
+    # Challenge-subdomain redirect — host changed after following redirects
+    if original_domain:
+        final_host = resp.url.host
+        if final_host and final_host != original_domain:
+            detections.append(
+                {
+                    "system": "challenge_redirect",
+                    "severity": "blocking",
+                    "signals": [f"redirected from {original_domain} to {final_host}"],
+                }
+            )
 
     # Cloudflare
     if headers.get("server", "").lower() == "cloudflare" or "cf-ray" in headers:
@@ -433,7 +452,8 @@ def probe_anti_bot(resp: httpx.Response) -> ProbeResult:
 
     top = detections[0]
     others = [d["system"] for d in detections[1:]]
-    summary = f"{top['system'].title()} ({top['severity']})"
+    label = top["system"].replace("_", " ").title()
+    summary = f"{label} ({top['severity']})"
     if others:
         summary += f" + {', '.join(others)}"
 
@@ -1045,7 +1065,7 @@ async def run_recon(
 
         # 4-6. Zero-cost probes on homepage response
         if homepage_resp:
-            probes.append(probe_anti_bot(homepage_resp))
+            probes.append(probe_anti_bot(homepage_resp, original_domain=domain))
         else:
             probes.append(
                 ProbeResult(
