@@ -80,14 +80,14 @@ Measured against the two biggest general-purpose open-source scraping frameworks
 | Pre-built pattern playbooks             |    ✅    |        |          |
 | Automated site recon (`megamaid recon`) |    ✅    |        |          |
 | Identity-hash delta detection           |    ✅    |        |          |
-| Crash-resumable manifest                |    ✅    |   ✅   |          |
+| MCP server (agents, workflows, scripts) |    ✅    |        |          |
 | Content-aware HTML → Markdown output    |    ✅    |        |    ✅    |
 | Headless browser rendering built-in     |    ✅    |        |    ✅    |
+| Crash-resumable manifest                |    ✅    |   ✅   |          |
 | Image download with resolution dedup    |    ✅    |   ✅   |          |
+| CLI for operations (run/status/diff)    |    ✅    |   ✅   |          |
 | robots.txt honored by default           |    ✅    |   ✅   |    ✅    |
 | Rate limiting + retry backoff           |    ✅    |   ✅   |    ✅    |
-| CLI for operations (run/status/diff)    |    ✅    |   ✅   |          |
-| MCP server (agents, workflows, scripts)       |    ✅    |        |          |
 | Local-first output (no DB or cloud)     |    ✅    |   ✅   |    ✅    |
 
 Scrapy wins on ecosystem depth (middlewares, pipelines, distributed crawling via Scrapyd). Crawl4AI wins on LLM-native extraction and speed. megamaid wins on "I want a working scraper for this one site by the end of the afternoon, and I want it to still work next month."
