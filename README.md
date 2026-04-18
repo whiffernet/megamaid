@@ -132,29 +132,20 @@ The MCP server lets agents, n8n workflows, and scripts call megamaid without ope
 
 **Quick start:**
 
-1. Find your user ID (`uid`) and group ID (`gid`) — these let the container read your files:
+1. Add two values to your `.env` (run `id` to find your UID:GID):
 
 ```bash
-id
-# uid=1001(alice) gid=1001(alice) ...
+MCP_BEARER_TOKEN=$(openssl rand -hex 32)
+MEGAMAID_UID_GID=1001:1001   # ← replace with your uid:gid from `id`
 ```
 
-2. Generate a secret token — this is just a random password you make up once:
-
-```bash
-openssl rand -hex 32
-# e.g. a3f8c2d1e4b5...
-```
-
-Save it to your `.env` file (same directory as `docker-compose.yml`): `MCP_BEARER_TOKEN=<that value>`. Docker Compose reads `.env` automatically — the `${MCP_BEARER_TOKEN}` in the yaml below is how it passes the value through to the container.
-
-3. Add to your `docker-compose.yml`:
+2. Add to your `docker-compose.yml`:
 
 ```yaml
 megamaid:
   image: ghcr.io/whiffernet/megamaid:latest
   container_name: megamaid-mcp
-  user: "1001:1001" # ← your uid:gid from step 1 (not a username/password)
+  user: "${MEGAMAID_UID_GID}"
   ports:
     - "127.0.0.1:8305:8000"
   volumes:
