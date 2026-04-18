@@ -22,15 +22,52 @@ See [`../EXAMPLES.md`](../EXAMPLES.md) for usage examples.
 
 - Docker + Docker Compose
 - A megamaid project already scaffolded (e.g. `~/megamaid-walmart`)
-- The `MCP_BEARER_TOKEN` you use for your other MCP servers
+
+### Step 0 — Create a secret token
+
+The MCP server requires every caller to present a secret token in the request
+header. Think of it like a password for the server — you make it up, put it in
+two places (the server's config and the client's config), and they match.
+
+**Generate one** (any method that produces a random string works):
+
+```bash
+openssl rand -hex 32
+# example output: a3f8c2d1e4b5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
+```
+
+**Save it** to your `.env` file (in the same directory as your
+`docker-compose.yml`):
+
+```bash
+MCP_BEARER_TOKEN=a3f8c2d1e4b5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
+```
+
+You'll use this same value in Step 4 when registering the server with Claude.
+Don't share it — it's the only thing standing between your filesystem and
+anyone else on the machine who can hit localhost:8305.
 
 ### Step 1 — Add the service to your docker-compose.yml
+
+The `user:` line tells Docker to run the container as your account instead of
+root. This matters because the container reads your project files from a mounted
+volume — if it runs as root, file ownership gets messy. The format is
+`"UID:GID"` — **not** a username and password.
+
+To find your values, run `id` in a terminal:
+
+```bash
+id
+# uid=1001(alice) gid=1001(alice) ...
+#     ^^^^              ^^^^
+#   use this          use this
+```
 
 ```yaml
 megamaid:
   image: ghcr.io/whiffernet/megamaid:latest # or build locally (see below)
   container_name: megamaid-mcp
-  user: "1000:1000" # match your host UID — run `id -u` to check
+  user: "1001:1001" # ← replace with your uid:gid from `id` above
   ports:
     - "127.0.0.1:8305:8000"
   cap_drop:
