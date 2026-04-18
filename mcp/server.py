@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -104,14 +105,40 @@ def _resolve_project(project: str) -> Path:
     return p
 
 
-def _venv_megamaid(project_path: Path) -> Path:
-    binary = project_path / ".venv" / "bin" / "megamaid"
-    if not binary.exists():
+def _venv_cmd(project_path: Path) -> tuple[list[str], dict]:
+    """Return (command, env) to run megamaid suck in the project venv.
+
+    Uses the container's Python (found via shutil.which) rather than the
+    venv's python3 symlink, which points to the host's /usr/bin/python3 —
+    a path that typically does not exist inside the container. The venv's
+    site-packages are injected via PYTHONPATH so project-specific deps work.
+    """
+    script = project_path / ".venv" / "bin" / "megamaid"
+    if not script.exists():
         raise ToolError(
             f"No .venv/bin/megamaid at {project_path}. "
             "Set up first: python3 -m venv .venv && pip install -e ."
         )
-    return binary
+
+    python = shutil.which("python3") or "/usr/local/bin/python3"
+
+    # Build PYTHONPATH with two entries:
+    # 1. project_path — so `import targets` finds targets/hnrss.py (not the
+    #    example_target bundled in the container's megamaid package). The venv's
+    #    editable-install .pth file encodes the host path (/home/e/...) which
+    #    doesn't resolve inside the container, so we add the project root directly.
+    # 2. venv site-packages — for any project-specific deps (bs4, lxml, etc.)
+    ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    site_pkgs = project_path / ".venv" / "lib" / ver / "site-packages"
+    env = dict(os.environ)
+    parts = [str(project_path)]
+    if site_pkgs.exists():
+        parts.append(str(site_pkgs))
+    if existing := env.get("PYTHONPATH", ""):
+        parts.append(existing)
+    env["PYTHONPATH"] = ":".join(parts)
+
+    return [python, str(script)], env
 
 
 def _parse_suck_stdout(stdout: str) -> tuple[dict, Path | None]:
@@ -192,7 +219,9 @@ def _latest_run_dir(staging_dir: Path) -> Path | None:
 
 @mcp.tool
 async def megamaid_recon(
-    url: Annotated[str, Field(description="Target URL to probe (e.g. https://example.com)")],
+    url: Annotated[
+        str, Field(description="Target URL to probe (e.g. https://example.com)")
+    ],
 ) -> dict:
     """Probe a URL and recommend a megamaid scraping pattern.
 
@@ -273,9 +302,8 @@ async def megamaid_run(
     """
     start = time.monotonic()
     project_path = _resolve_project(project)
-    binary = _venv_megamaid(project_path)
-
-    cmd = [str(binary), "suck"]
+    base_cmd, env = _venv_cmd(project_path)
+    cmd = base_cmd + ["suck"]
     if max_items is not None:
         cmd += ["--max", str(max_items)]
 
@@ -286,6 +314,7 @@ async def megamaid_run(
             capture_output=True,
             text=True,
             timeout=TIMEOUT,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         raise ToolError(f"megamaid suck timed out after {int(TIMEOUT)}s")
@@ -296,6 +325,10 @@ async def megamaid_run(
         )
 
     stats_dict, manifest_path = _parse_suck_stdout(proc.stdout)
+
+    # Resolve relative paths (suck prints "Manifest: staging/...") against project_path
+    if manifest_path and not manifest_path.is_absolute():
+        manifest_path = project_path / manifest_path
 
     run_id = manifest_path.parent.name if manifest_path else ""
     target_name = manifest_path.parent.parent.name if manifest_path else ""
@@ -311,7 +344,9 @@ async def megamaid_run(
     }
 
     if include_docs and manifest_path:
-        new_docs, changed_docs = _load_new_changed_docs(manifest_path.parent, summary_only)
+        new_docs, changed_docs = _load_new_changed_docs(
+            manifest_path.parent, summary_only
+        )
         response["new_docs"] = new_docs
         response["changed_docs"] = changed_docs
 
