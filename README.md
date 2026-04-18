@@ -4,9 +4,14 @@
 >
 > — President Skroob, probably
 
-**megamaid** is a [Claude Code](https://claude.ai/claude-code) skill that scaffolds polite, resumable web scrapers. Point it at a URL, and it stands up a self-contained Python project that vacuums content into local files — raw HTML/JSON, normalized Markdown, and optionally images — with rate limiting, retry logic, and crash-resumable manifest tracking.
+**megamaid** comes in two flavors:
 
-No servers. No vector stores. No phoning home. Just files.
+- **[Claude Code skill](#installation--as-a-claude-code-skill)** — Claude reads the pattern playbooks and writes a bespoke scraper for your target. Interactive, code-generating, one site at a time.
+- **[MCP server](#installation--as-an-mcp-server-megamaid-mcp)** — exposes `megamaid_recon` and `megamaid_run` as callable tools for agents, n8n workflows, and scripts. No Claude session required.
+
+Both ship from the same repo. Both produce the same output: self-contained Python projects that vacuum content into local files — raw HTML/JSON, normalized Markdown, and optionally images — with rate limiting, retry logic, and crash-resumable manifest tracking.
+
+No databases. No vector stores. No phoning home. Just files.
 
 ## What it does
 
@@ -82,13 +87,14 @@ Measured against the two biggest general-purpose open-source scraping frameworks
 | robots.txt honored by default           |    ✅    |   ✅   |    ✅    |
 | Rate limiting + retry backoff           |    ✅    |   ✅   |    ✅    |
 | CLI for operations (run/status/diff)    |    ✅    |   ✅   |          |
+| MCP server (agents, n8n, scripts)       |    ✅    |        |          |
 | Local-first output (no DB or cloud)     |    ✅    |   ✅   |    ✅    |
 
 Scrapy wins on ecosystem depth (middlewares, pipelines, distributed crawling via Scrapyd). Crawl4AI wins on LLM-native extraction and speed. megamaid wins on "I want a working scraper for this one site by the end of the afternoon, and I want it to still work next month."
 
 ## Examples
 
-See [`EXAMPLES.md`](EXAMPLES.md) for three end-to-end walkthroughs: downloading product images, archiving PDFs with text extraction, and following an RSS feed to a growing local archive.
+See [`EXAMPLES.md`](EXAMPLES.md) for end-to-end walkthroughs: downloading product images (Lego at Walmart), archiving PDFs (FDA drug labels), following an RSS feed to a growing local archive, plus three MCP examples — agent sub-tool, n8n scheduled monitoring, and a plain Python cron script.
 
 ## Troubleshooting
 
@@ -96,31 +102,72 @@ See [`EXAMPLES.md`](EXAMPLES.md) for three end-to-end walkthroughs: downloading 
 
 Most scraper bugs are the equivalent of raspberry jam. See `references/troubleshooting.md` for selector drift, timeouts, blocks, and the stealth workaround for anti-bot CDNs.
 
-## Installation
+## Installation — as a Claude Code skill
 
 > _"One command. Even I can do it, and I'm half-dog."_
 >
 > — Barf
 
-Copy this repo into your Claude Code skills directory:
-
 ```bash
 git clone git@github.com:whiffernet/megamaid.git ~/.claude/skills/megamaid
 ```
 
-Verify the skill registered:
+Verify it registered:
 
 ```bash
 ls ~/.claude/skills/megamaid/SKILL.md
 ```
 
-The skill is auto-discovered by Claude Code via `SKILL.md`. Ask Claude to "scrape a website" or "build a scraper for X" and it will invoke megamaid.
+The skill is auto-discovered via `SKILL.md`. Ask Claude to "scrape a website" or "build a scraper for X" and it will invoke megamaid.
 
-## Requirements
+**Requires:** Python 3.11+ on the host. Everything else installs automatically when a project is scaffolded.
 
-> _"Ludicrous speed? No, no, no — regular speed. We're dry-running."_
+## Installation — as an MCP server (megamaid-mcp)
 
-- **Python 3.11+** — everything else is installed automatically during scaffolding
+> _"They said it couldn't be done. I said I hadn't tried yet."_
+>
+> — Lone Starr, probably
+
+The MCP server lets agents, n8n workflows, and scripts call megamaid without opening a Claude session. Full instructions: [`mcp/README.md`](mcp/README.md).
+
+**Quick start:**
+
+1. Add to your `docker-compose.yml` (replace `1000:1000` with your `id -u`:`id -g`):
+
+```yaml
+megamaid:
+  image: ghcr.io/whiffernet/megamaid:latest
+  container_name: megamaid-mcp
+  user: "1000:1000"
+  ports:
+    - "127.0.0.1:8305:8000"
+  volumes:
+    - "${MEGAMAID_PROJECTS_DIR:-$HOME}:/projects:rw"
+  environment:
+    - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN}
+    - MEGAMAID_PROJECTS_DIR_INTERNAL=/projects
+  restart: unless-stopped
+```
+
+2. Register with Claude Code — add to `~/.claude/mcp.json`:
+
+```json
+{
+  "megamaid": {
+    "type": "http",
+    "url": "http://localhost:8305",
+    "headers": { "Authorization": "Bearer ${MCP_BEARER_TOKEN}" }
+  }
+}
+```
+
+3. Start it:
+
+```bash
+docker compose up -d megamaid
+```
+
+The four `megamaid_*` tools will appear in Claude's tool list on next launch.
 
 ## License
 
