@@ -23,16 +23,16 @@ See [`../EXAMPLES.md`](../EXAMPLES.md) for usage examples.
 - Docker + Docker Compose
 - A megamaid project already scaffolded (e.g. `~/megamaid-walmart`)
 
-### Step 0 — Add two values to your `.env`
+### Step 0 — Populate your `.env`
+
+Run this once from the same directory as your `docker-compose.yml`:
 
 ```bash
-# A random secret — anyone calling the server must present this token
-MCP_BEARER_TOKEN=$(openssl rand -hex 32)
-
-# Your Linux user/group ID so the container can read your project files
-# Run `id` to find yours: uid=1001(alice) gid=1001(alice) → use 1001:1001
-MEGAMAID_UID_GID=1001:1001
+echo "MCP_BEARER_TOKEN=$(openssl rand -hex 32)" >> .env
+echo "MEGAMAID_UID_GID=$(id -u):$(id -g)" >> .env
 ```
+
+That's it — a random secret token and your user/group ID so the container can read your project files.
 
 ### Step 1 — Add the service to your docker-compose.yml
 

@@ -132,11 +132,11 @@ The MCP server lets agents, n8n workflows, and scripts call megamaid without ope
 
 **Quick start:**
 
-1. Add two values to your `.env` (run `id` to find your UID:GID):
+1. Populate your `.env` (run once, from the same directory as `docker-compose.yml`):
 
 ```bash
-MCP_BEARER_TOKEN=$(openssl rand -hex 32)
-MEGAMAID_UID_GID=1001:1001   # ← replace with your uid:gid from `id`
+echo "MCP_BEARER_TOKEN=$(openssl rand -hex 32)" >> .env
+echo "MEGAMAID_UID_GID=$(id -u):$(id -g)" >> .env
 ```
 
 2. Add to your `docker-compose.yml`:
