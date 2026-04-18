@@ -1,5 +1,7 @@
 # megamaid
 
+![Megamaid — orbital vacuum platform, hyperrealistic sci-fi render](assets/megamaid.jpg)
+
 > _"Suck... suck... suck... suck... ah, there it is. Begin operation schlepp-content."_
 >
 > — President Skroob, probably
