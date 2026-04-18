@@ -43,6 +43,12 @@ openssl rand -hex 32
 MCP_BEARER_TOKEN=a3f8c2d1e4b5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
 ```
 
+Docker Compose reads `.env` automatically. The line
+`- MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN}` in the yaml is how it passes the
+value through to the container — `${MCP_BEARER_TOKEN}` is Docker's substitution
+syntax for "read this from `.env`". You only store it in one place (`.env`);
+the yaml just wires it in.
+
 You'll use this same value in Step 4 when registering the server with Claude.
 Don't share it — it's the only thing standing between your filesystem and
 anyone else on the machine who can hit localhost:8305.

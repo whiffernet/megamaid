@@ -146,7 +146,7 @@ openssl rand -hex 32
 # e.g. a3f8c2d1e4b5...
 ```
 
-Save it to your `.env` file: `MCP_BEARER_TOKEN=<that value>`
+Save it to your `.env` file (same directory as `docker-compose.yml`): `MCP_BEARER_TOKEN=<that value>`. Docker Compose reads `.env` automatically — the `${MCP_BEARER_TOKEN}` in the yaml below is how it passes the value through to the container.
 
 3. Add to your `docker-compose.yml`:
 
