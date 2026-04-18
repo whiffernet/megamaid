@@ -1,7 +1,7 @@
 # megamaid-mcp
 
 MCP server for megamaid — exposes web scraping as callable tools for agents,
-n8n workflows, and scripts. No Claude Code session required.
+automation workflows, and scripts. No Claude Code session required.
 
 ## Tools
 

@@ -7,7 +7,7 @@
 **megamaid** comes in two flavors:
 
 - **[Claude Code skill](#installation--as-a-claude-code-skill)** — Claude reads the pattern playbooks and writes a bespoke scraper for your target. Interactive, code-generating, one site at a time.
-- **[MCP server](#installation--as-an-mcp-server-megamaid-mcp)** — exposes `megamaid_recon` and `megamaid_run` as callable tools for agents, n8n workflows, and scripts. No Claude session required.
+- **[MCP server](#installation--as-an-mcp-server-megamaid-mcp)** — exposes `megamaid_recon` and `megamaid_run` as callable tools for agents, automation workflows, and scripts. No Claude session required.
 
 Both ship from the same repo. Both produce the same output: self-contained Python projects that vacuum content into local files — raw HTML/JSON, normalized Markdown, and optionally images — with rate limiting, retry logic, and crash-resumable manifest tracking.
 
@@ -87,14 +87,14 @@ Measured against the two biggest general-purpose open-source scraping frameworks
 | robots.txt honored by default           |    ✅    |   ✅   |    ✅    |
 | Rate limiting + retry backoff           |    ✅    |   ✅   |    ✅    |
 | CLI for operations (run/status/diff)    |    ✅    |   ✅   |          |
-| MCP server (agents, n8n, scripts)       |    ✅    |        |          |
+| MCP server (agents, workflows, scripts)       |    ✅    |        |          |
 | Local-first output (no DB or cloud)     |    ✅    |   ✅   |    ✅    |
 
 Scrapy wins on ecosystem depth (middlewares, pipelines, distributed crawling via Scrapyd). Crawl4AI wins on LLM-native extraction and speed. megamaid wins on "I want a working scraper for this one site by the end of the afternoon, and I want it to still work next month."
 
 ## Examples
 
-See [`EXAMPLES.md`](EXAMPLES.md) for end-to-end walkthroughs: downloading product images (Lego at Walmart), archiving PDFs (FDA drug labels), following an RSS feed to a growing local archive, plus three MCP examples — agent sub-tool, n8n scheduled monitoring, and a plain Python cron script.
+See [`EXAMPLES.md`](EXAMPLES.md) for end-to-end walkthroughs: downloading product images (Lego at Walmart), archiving PDFs (FDA drug labels), following an RSS feed to a growing local archive, plus three MCP examples — agent sub-tool, scheduled workflow monitoring, and a plain Python cron script.
 
 ## Troubleshooting
 
@@ -128,7 +128,7 @@ The skill is auto-discovered via `SKILL.md`. Ask Claude to "scrape a website" or
 >
 > — Lone Starr, probably
 
-The MCP server lets agents, n8n workflows, and scripts call megamaid without opening a Claude session. Full instructions: [`mcp/README.md`](mcp/README.md).
+The MCP server lets agents, automation workflows, and scripts call megamaid without opening a Claude session. Full instructions: [`mcp/README.md`](mcp/README.md).
 
 **Quick start:**
 

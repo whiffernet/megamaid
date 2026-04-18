@@ -137,7 +137,7 @@ Run it daily and you get a growing local archive of everything that surfaces on 
 >
 > — Dark Helmet, discovering how much faster things get when you stop opening Claude Code every time
 
-The MCP server (`megamaid-mcp`) exposes the same scraping power as a callable tool — no conversation required. These examples show what it looks like from a Claude agent, an n8n workflow, and a direct API call.
+The MCP server (`megamaid-mcp`) exposes the same scraping power as a callable tool — no conversation required. These examples show what it looks like from a Claude agent, an automation workflow, and a direct API call.
 
 ### MCP Example 1: Agent sub-tool
 
@@ -185,11 +185,11 @@ for doc in result["new_docs"]:
 
 ---
 
-### MCP Example 2: n8n automation (scheduled monitoring)
+### MCP Example 2: Scheduled workflow (site monitoring)
 
-An n8n workflow calls `megamaid_recon` weekly against a list of competitor sites. When a site changes its anti-bot system or opens a new sitemap, a Slack alert fires — no Claude session, no human needed.
+A scheduled workflow calls `megamaid_recon` weekly against a list of competitor sites. When a site changes its anti-bot system or opens a new sitemap, a Slack alert fires — no Claude session, no human needed.
 
-**n8n workflow:**
+**Workflow:**
 
 ```
 Schedule trigger (Monday 9am)
@@ -215,7 +215,7 @@ Slack node: "competitor.com switched from paginated_html → rest_json_api"
 }
 ```
 
-Store last week's `recommended_pattern.pattern` in n8n's static data. Compare on each run. If it changed, something significant happened on the target site worth investigating.
+Store last week's `recommended_pattern.pattern` in the workflow's static data. Compare on each run. If it changed, something significant happened on the target site worth investigating.
 
 ---
 
