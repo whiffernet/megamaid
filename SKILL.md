@@ -106,7 +106,12 @@ named after the target). After copying:
 
 1. Rename `targets/example_target.py` to `targets/<slug>.py`.
 2. Edit `pyproject.toml` — set `name` and the console script entry.
-3. Tell the user to run: `python -m venv .venv && source .venv/bin/activate && pip install -e . && playwright install chromium`.
+3. Stamp the skill version: write the contents of this skill's `VERSION`
+   file into `.megamaid-version` at the project root. This records which
+   megamaid version the project was scaffolded from, so later you can see
+   how far its copied `megamaid/` runtime has drifted from the current
+   skill. (A project with no `.megamaid-version` predates this scheme.)
+4. Tell the user to run: `python -m venv .venv && source .venv/bin/activate && pip install -e . && playwright install chromium`.
 
 ### 4. Write the target class
 
