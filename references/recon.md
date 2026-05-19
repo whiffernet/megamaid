@@ -25,8 +25,9 @@ you sink an hour into scaffolding that won't work.
    curl -sL -A "Mozilla/5.0" https://<domain>/some/item | head -200
    ```
 
-   - If the HTML contains your target content: static HTML — use
-     `paginated_html.md` or `sitemap_crawl.md`.
+   - If the HTML contains your target content: a static-HTML pattern is
+     _viable_ — but don't commit to it yet. Scrapeable HTML is a local
+     optimum; step 4 still applies and an API usually beats it.
    - If you see `<div id="root"></div>` and a bunch of `<script>` tags
      with no content: SPA — use `spa_hydration.md`.
    - If you see `<meta name="shopify-checkout-api-token">`: Shopify —
@@ -35,9 +36,15 @@ you sink an hour into scaffolding that won't work.
      directly (see `spa_hydration.md`).
 
 4. **Open DevTools → Network → XHR/Fetch.** Reload the page and scroll
-   through the list. If you see a clean JSON endpoint delivering the
-   data: **skip HTML entirely**, call that JSON endpoint. This is the
-   single biggest win in scraping.
+   through the list. If you see a clean JSON or GraphQL endpoint
+   delivering the data: **skip HTML entirely**, call that endpoint. This
+   is the single biggest win in scraping.
+
+   **Do this even when step 3's HTML looked perfectly scrapeable.** A
+   working HTML path is the #1 reason this check gets skipped — and the
+   API behind it is almost always faster, sturdier (no selector drift,
+   no lazy-load races), and lighter on the site. "The HTML works" is not
+   a reason to stop looking; it is the reason the better path gets missed.
 
 5. **Look at the ToS.** Most sites have a `/terms` page. If it forbids
    automated access or scraping, and the user doesn't have explicit
@@ -61,8 +68,10 @@ Quick visual tells when you view source:
 
 ## When the target doesn't fit a pattern
 
-- Site is a mix (paginated HTML index → SPA detail pages): use
-  `paginated_html.md` for discovery and `spa_hydration.md` for per-page.
+- Site is a mix (paginated HTML index → SPA detail pages): check for the
+  index's data API first (step 4) — an SPA almost always has one, and it
+  beats paginating rendered HTML. Fall back to `paginated_html.md` for
+  discovery + `spa_hydration.md` for per-page only if there is no API.
 - Site serves different HTML to bots vs. browsers: set `headless=False`
   temporarily to compare; if the browser-view content matters, stay
   in Playwright (headed or not).

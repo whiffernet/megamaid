@@ -97,6 +97,22 @@ Manual recon steps (or if `megamaid recon` is not available):
    | 401/login wall                                  | `auth_wall.md`          |
    | User wants product images, galleries, or assets | `image_downloads.md`    |
 
+   **When more than one signal matches, prefer structured data over
+   HTML.** A site often exposes the same catalog two ways — a JSON or
+   GraphQL API _and_ scrapeable HTML. Scrapeable HTML is a trap: it
+   works, so it ends the search before you find the API — which is
+   almost always better (faster, no selector drift, no render/lazy-load
+   fragility, lighter on the site). Preference order:
+   1. `rest_json_api` / `graphql_api` — clean JSON, no auth
+   2. `sitemap_crawl`
+   3. structured data embedded in HTML (`__NEXT_DATA__`, JSON-LD)
+   4. `paginated_html` / `load_more_infinite` — DOM scraping, last resort
+
+   Even when the rendered HTML already contains the data, open
+   DevTools → Network (XHR/Fetch) and check for an API **before**
+   committing to HTML scraping. An auth-walled or cost-limited API can
+   rank below a clean sitemap — judge per target.
+
 Read `references/recon.md` if the target doesn't fit cleanly.
 
 ### 3. Scaffold the project
