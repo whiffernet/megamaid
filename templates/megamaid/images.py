@@ -16,12 +16,14 @@ import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 from playwright.async_api import Page
 
+from .image_index import ImageIndex, cached_imageref
 from .models import ImageRef
 
 logger = logging.getLogger(__name__)
@@ -330,6 +332,7 @@ async def download_images(
     candidates: list[ImageCandidate],
     dest_dir: Path,
     *,
+    index: ImageIndex | None = None,
     user_agent: str = "megamaid/0.1",
     max_bytes: int = 10 * 1024 * 1024,
     min_bytes: int = 1024,
@@ -338,13 +341,20 @@ async def download_images(
 ) -> list[ImageRef]:
     """Download image candidates with content-hash deduplication.
 
-    Images are saved with content-hash filenames (16 hex chars + extension).
-    If the same image appears multiple times (e.g. on different product
-    pages), only one copy is written to disk.
+    Images are saved into ``dest_dir`` with content-hash filenames
+    (16 hex chars + extension), so identical bytes are stored once.
+
+    When an ``index`` is supplied, ``dest_dir`` is treated as a shared
+    content-addressed store: before fetching a URL the index is checked,
+    and a fresh hit whose file is already on disk is reused with **no
+    network request**. Newly downloaded images are recorded in the index.
 
     Args:
         candidates: Image candidates from ``discover_page_images()``.
-        dest_dir: Directory to save image files to.
+        dest_dir: Directory to save image files to (the shared store
+            when ``index`` is used).
+        index: Optional cross-run image index for deduplication. When
+            None, every candidate is downloaded (legacy behavior).
         user_agent: User-Agent header for download requests.
         max_bytes: Skip images larger than this (bytes).
         min_bytes: Skip images smaller than this (catches placeholders).
@@ -352,19 +362,39 @@ async def download_images(
         concurrency: Number of parallel downloads.
 
     Returns:
-        List of ImageRef objects for successfully downloaded images.
+        List of ImageRef objects for the resolved images.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
     sem = asyncio.Semaphore(concurrency)
     results: list[ImageRef] = []
     hash_to_path: dict[str, Path] = {}
+    skipped = 0
 
     to_download = candidates[:max_count]
 
     async def _download_one(
         client: httpx.AsyncClient, candidate: ImageCandidate
     ) -> ImageRef | None:
+        nonlocal skipped
         url = candidate.url
+
+        # Cross-run dedup: a fresh index hit means the image is already
+        # in the store — reuse it and issue no network request.
+        if index is not None:
+            cached = cached_imageref(
+                index,
+                url,
+                dest_dir,
+                now,
+                alt_text=candidate.alt_text,
+                width=candidate.width or None,
+                height=candidate.height or None,
+            )
+            if cached is not None:
+                skipped += 1
+                return cached
+
         async with sem:
             try:
                 resp = await client.get(url, follow_redirects=True, timeout=30.0)
@@ -394,6 +424,15 @@ async def download_images(
                 path.write_bytes(data)
                 hash_to_path[short_hash] = path
 
+                if index is not None:
+                    index.put(
+                        url,
+                        full,
+                        ext,
+                        etag=resp.headers.get("etag"),
+                        last_modified=resp.headers.get("last-modified"),
+                    )
+
                 return ImageRef(
                     source_url=url,
                     local_path=str(path.relative_to(dest_dir.parent)),
@@ -415,12 +454,11 @@ async def download_images(
             if ref is not None:
                 results.append(ref)
 
-    unique = len(hash_to_path)
-    dupes = len(results) - unique
+    downloaded = len(hash_to_path)
     total_bytes = sum(p.stat().st_size for p in hash_to_path.values())
     logger.info(
-        f"Images: {len(results)} downloaded ({unique} unique, {dupes} duplicates, "
-        f"{total_bytes / 1024 / 1024:.1f} MB)"
+        f"Images: {len(results)} refs ({downloaded} downloaded, "
+        f"{skipped} reused from index, {total_bytes / 1024 / 1024:.1f} MB fetched)"
     )
 
     return results

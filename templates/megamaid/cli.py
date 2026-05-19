@@ -23,6 +23,7 @@ from urllib.robotparser import RobotFileParser
 import click
 
 from .base import create_browser
+from .image_index import ImageIndex
 from .manifest import Manifest, ManifestItem, compute_delta, get_latest_manifest
 from .models import slug_from_url
 
@@ -209,9 +210,13 @@ def suck(max_items: int | None, ignore_robots: bool, staging: Path) -> None:
     raw_dir = run_dir / "raw"
     docs_dir = run_dir / "docs"
     debug_dir = run_dir / "debug"
-    images_dir = run_dir / "images"
+    # Images live in a per-target shared store so identical bytes are
+    # downloaded once and reused across runs via the image index.
+    images_dir = staging / target.target_name / "images"
+    index_path = staging / target.target_name / "image_index.json"
     for d in (raw_dir, docs_dir, debug_dir, images_dir):
         d.mkdir(parents=True, exist_ok=True)
+    image_index = ImageIndex.load(index_path)
 
     manifest = Manifest(
         run_id=run_id,
@@ -226,6 +231,7 @@ def suck(max_items: int | None, ignore_robots: bool, staging: Path) -> None:
         pw, browser = await create_browser()
         target._debug_dir = debug_dir
         target._images_dir = images_dir
+        target._image_index = image_index
         try:
             docs = await target.run(browser, max_items=max_items)
         finally:
@@ -277,6 +283,8 @@ def suck(max_items: int | None, ignore_robots: bool, staging: Path) -> None:
     finally:
         manifest.completed_at = datetime.now(timezone.utc).isoformat()
         manifest.save(manifest_path)
+        # Persist the image index even on failure, so a re-run resumes.
+        image_index.save(index_path)
 
     click.echo(json.dumps(manifest.stats.to_dict(), indent=2))
     total_images = sum(item.image_count for item in manifest.items)
@@ -284,7 +292,10 @@ def suck(max_items: int | None, ignore_robots: bool, staging: Path) -> None:
         unique_hashes = set()
         for item in manifest.items:
             unique_hashes.update(item.image_hashes)
-        image_bytes = sum(f.stat().st_size for f in images_dir.iterdir() if f.is_file())
+        image_bytes = 0
+        for h in unique_hashes:
+            for f in images_dir.glob(f"{h[:16]}.*"):
+                image_bytes += f.stat().st_size
         click.echo(
             f"Images: {total_images} ({len(unique_hashes)} unique, "
             f"{image_bytes / 1024 / 1024:.1f} MB)"
