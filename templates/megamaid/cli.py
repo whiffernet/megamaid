@@ -56,11 +56,7 @@ def _load_target():
         module = import_module(f"targets.{name}")
         for attr in dir(module):
             obj = getattr(module, attr)
-            if (
-                isinstance(obj, type)
-                and issubclass(obj, BaseScraper)
-                and obj is not BaseScraper
-            ):
+            if isinstance(obj, type) and issubclass(obj, BaseScraper) and obj is not BaseScraper:
                 found.append((f"targets.{name}.{attr}", obj))
     if not found:
         raise RuntimeError("No BaseScraper subclass found under targets/")
@@ -134,12 +130,8 @@ def cli() -> None:
     help="Write JSON report to file.",
 )
 @click.option("--user-agent", default=None, help="Override User-Agent.")
-@click.option(
-    "--timeout", type=float, default=10.0, help="Per-request timeout (seconds)."
-)
-@click.option(
-    "--quiet", is_flag=True, help="Suppress progress, print only final report."
-)
+@click.option("--timeout", type=float, default=10.0, help="Per-request timeout (seconds).")
+@click.option("--quiet", is_flag=True, help="Suppress progress, print only final report.")
 def recon(
     url: str,
     fmt: str,
@@ -154,8 +146,8 @@ def recon(
     API endpoints with 3-6 HTTP requests. Outputs a pattern recommendation
     with confidence level.
     """
-    from .recon import run_recon, format_text_report, format_json_report
     from .base import DEFAULT_USER_AGENT
+    from .recon import format_json_report, format_text_report, run_recon
 
     ua = user_agent or DEFAULT_USER_AGENT
     if not quiet:
@@ -347,9 +339,7 @@ def diff(staging: Path) -> None:
     default="jsonl",
     help="Output format (default: jsonl).",
 )
-@click.option(
-    "--run", "run_id", default=None, help="Specific run ID (default: latest)."
-)
+@click.option("--run", "run_id", default=None, help="Specific run ID (default: latest).")
 @click.option("--staging", type=click.Path(path_type=Path), default=STAGING_DIR)
 def export_cmd(fmt: str, run_id: str | None, staging: Path) -> None:
     """Export scraped docs as CSV, JSONL, or consolidated JSON."""
@@ -423,13 +413,9 @@ def export_cmd(fmt: str, run_id: str | None, staging: Path) -> None:
 @cli.command()
 @click.argument("url")
 @click.option("--max", "max_urls", type=int, default=500, help="Max URLs to discover.")
-@click.option(
-    "--filter", "url_filter", default=None, help="Only URLs containing this substring."
-)
+@click.option("--filter", "url_filter", default=None, help="Only URLs containing this substring.")
 @click.option("--output", "output_file", type=click.Path(path_type=Path), default=None)
-def map(
-    url: str, max_urls: int, url_filter: str | None, output_file: Path | None
-) -> None:
+def map(url: str, max_urls: int, url_filter: str | None, output_file: Path | None) -> None:
     """Discover all URLs on a domain (sitemap + link crawl)."""
     from xml.etree import ElementTree as ET
 
@@ -506,9 +492,7 @@ def map(
                     continue
                 visited.add(current)
                 try:
-                    await page.goto(
-                        current, wait_until="domcontentloaded", timeout=15000
-                    )
+                    await page.goto(current, wait_until="domcontentloaded", timeout=15000)
                     links = await page.eval_on_selector_all(
                         "a[href]", "els => els.map(e => e.href)"
                     )

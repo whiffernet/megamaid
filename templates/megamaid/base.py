@@ -13,16 +13,19 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from playwright.async_api import Browser, Page, async_playwright
 
 from .models import ScrapedDoc
 
+if TYPE_CHECKING:
+    import httpx
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = (
-    "megamaid/0.1 (+https://github.com/whiffernet/megamaid) "
-    "Mozilla/5.0 (compatible; Chromium/131)"
+    "megamaid/0.1 (+https://github.com/whiffernet/megamaid) Mozilla/5.0 (compatible; Chromium/131)"
 )
 
 
@@ -71,9 +74,7 @@ class BaseScraper(ABC):
         if self._debug_dir:
             self._debug_dir.mkdir(parents=True, exist_ok=True)
 
-    async def run(
-        self, browser: Browser, max_items: int | None = None
-    ) -> list[ScrapedDoc]:
+    async def run(self, browser: Browser, max_items: int | None = None) -> list[ScrapedDoc]:
         """Scrape all documents from this target.
 
         Args:
@@ -114,7 +115,7 @@ class BaseScraper(ABC):
 
     async def _fetch_json(
         self,
-        client: "httpx.AsyncClient",
+        client: httpx.AsyncClient,
         url: str,
         retries: int = 3,
     ) -> dict | list | None:
@@ -167,7 +168,7 @@ class BaseScraper(ABC):
 
     async def _fetch_xml(
         self,
-        client: "httpx.AsyncClient",
+        client: httpx.AsyncClient,
         url: str,
         retries: int = 3,
     ) -> str | None:
@@ -196,8 +197,7 @@ class BaseScraper(ABC):
                     raw = resp.headers.get("Retry-After", str(2**attempt))
                     retry_after = min(int(raw), 30)
                     logger.warning(
-                        f"[{self.target_name}] Rate limited (429), "
-                        f"waiting {retry_after}s"
+                        f"[{self.target_name}] Rate limited (429), waiting {retry_after}s"
                     )
                     await asyncio.sleep(retry_after)
                     continue
@@ -282,9 +282,9 @@ class BaseScraper(ABC):
         # Fallback: text-based selectors (can't combine with CSS selectors)
         for text in ("Accept All", "Accept", "I agree", "Got it"):
             try:
-                btn = page.get_by_text(text, exact=True).first
-                if await btn.is_visible():
-                    await btn.click()
+                loc = page.get_by_text(text, exact=True).first
+                if await loc.is_visible():
+                    await loc.click()
                     logger.info(f"[{self.target_name}] Dismissed consent banner")
                     return
             except Exception:
@@ -309,9 +309,7 @@ class BaseScraper(ABC):
             logger.warning(f"[{self.target_name}] Failed to save error screenshot")
 
     @abstractmethod
-    async def scrape(
-        self, page: Page, max_items: int | None = None
-    ) -> list[ScrapedDoc]:
+    async def scrape(self, page: Page, max_items: int | None = None) -> list[ScrapedDoc]:
         """Scrape all documents from the target.
 
         Implementations are responsible for:

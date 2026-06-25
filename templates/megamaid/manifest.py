@@ -126,16 +126,10 @@ class Manifest:
             completed_at=data.get("completed_at", ""),
             status=data.get("status", "unknown"),
         )
-        manifest.items = [
-            ManifestItem.from_dict(item) for item in data.get("items", [])
-        ]
+        manifest.items = [ManifestItem.from_dict(item) for item in data.get("items", [])]
         stats_data = data.get("stats", {})
         manifest.stats = ManifestStats(
-            **{
-                k: v
-                for k, v in stats_data.items()
-                if k in ManifestStats.__dataclass_fields__
-            }
+            **{k: v for k, v in stats_data.items() if k in ManifestStats.__dataclass_fields__}
         )
         return manifest
 

@@ -72,9 +72,7 @@ class ScrapedDoc(BaseModel):
             "content_md": self.content_md,
             "metadata": self.metadata,
         }
-        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode(
-            "utf-8"
-        )
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
         self.identity_hash = hashlib.sha256(encoded).hexdigest()
         return self.identity_hash
 

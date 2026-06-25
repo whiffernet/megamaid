@@ -83,9 +83,7 @@ async def stealth_http_client(
             await client.get(base_url)
             logger.info("stealth_http_client: session warmed for %s", base_url)
         except Exception as exc:
-            logger.warning(
-                "stealth_http_client: warmup failed for %s: %s", base_url, exc
-            )
+            logger.warning("stealth_http_client: warmup failed for %s: %s", base_url, exc)
         yield client
 
 
@@ -146,9 +144,9 @@ async def dismiss_modals(page: Page, timeout: int = 3000) -> None:
         "Maybe Later",
     ):
         try:
-            btn = page.get_by_text(text, exact=True).first
-            if await btn.is_visible():
-                await btn.click()
+            loc = page.get_by_text(text, exact=True).first
+            if await loc.is_visible():
+                await loc.click()
                 logger.info(f"Dismissed modal (text: {text})")
                 await asyncio.sleep(0.5)
                 return
@@ -297,9 +295,7 @@ async def paginated_discovery(
         all_urls.update(new_urls)
         added = len(all_urls) - before
 
-        logger.info(
-            f"Page {page_num}: {len(new_urls)} links, {added} new (total: {len(all_urls)})"
-        )
+        logger.info(f"Page {page_num}: {len(new_urls)} links, {added} new (total: {len(all_urls)})")
 
         if added == 0 or len(new_urls) == 0:
             break
@@ -356,13 +352,9 @@ async def sitemap_discovery(
 
     def _parse(sm_url: str) -> None:
         try:
-            resp = httpx.get(
-                sm_url, timeout=30.0, follow_redirects=True, headers=headers
-            )
+            resp = httpx.get(sm_url, timeout=30.0, follow_redirects=True, headers=headers)
             if resp.status_code != 200:
-                logger.warning(
-                    f"Sitemap fetch returned {resp.status_code} for {sm_url}"
-                )
+                logger.warning(f"Sitemap fetch returned {resp.status_code} for {sm_url}")
                 return
             root = ET.fromstring(resp.text)
             tag = root.tag.split("}", 1)[-1]
@@ -383,9 +375,7 @@ async def sitemap_discovery(
                     image_urls: list[str] = []
                     if extract_images:
                         for img_el in u.findall("image:image", ns):
-                            img_loc = img_el.findtext(
-                                "image:loc", default="", namespaces=ns
-                            )
+                            img_loc = img_el.findtext("image:loc", default="", namespaces=ns)
                             if img_loc:
                                 image_urls.append(img_loc)
 
@@ -399,11 +389,7 @@ async def sitemap_discovery(
 
     logger.info(
         f"Sitemap discovery: {len(products)} product URLs"
-        + (
-            f", {sum(len(p.image_urls) for p in products)} image URLs"
-            if extract_images
-            else ""
-        )
+        + (f", {sum(len(p.image_urls) for p in products)} image URLs" if extract_images else "")
     )
 
     if extract_images:
