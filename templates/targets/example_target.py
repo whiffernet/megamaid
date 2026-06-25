@@ -14,10 +14,9 @@ the matching playbook under the megamaid skill's patterns/ directory:
 
 from __future__ import annotations
 
-from playwright.async_api import Page
-
 from megamaid.base import BaseScraper
 from megamaid.models import ScrapedDoc, slug_from_url
+from playwright.async_api import Page
 
 
 class ExampleTarget(BaseScraper):
@@ -27,9 +26,7 @@ class ExampleTarget(BaseScraper):
     base_url = "https://example.com"
     rate_limit_seconds = 2.0
 
-    async def scrape(
-        self, page: Page, max_items: int | None = None
-    ) -> list[ScrapedDoc]:
+    async def scrape(self, page: Page, max_items: int | None = None) -> list[ScrapedDoc]:
         """Discover URLs and scrape each one.
 
         Args:

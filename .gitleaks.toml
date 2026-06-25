@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Historical example token in mcp/README.md (commit 439f1cd) — already rotated"
+commits = ["439f1cdcd52233bb6f3d54660653f831ab5c60f1"]

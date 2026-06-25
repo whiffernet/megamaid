@@ -410,9 +410,7 @@ async def download_images(
                 if short_hash in hash_to_path:
                     return ImageRef(
                         source_url=url,
-                        local_path=str(
-                            hash_to_path[short_hash].relative_to(dest_dir.parent)
-                        ),
+                        local_path=str(hash_to_path[short_hash].relative_to(dest_dir.parent)),
                         content_hash=full,
                         alt_text=candidate.alt_text,
                         width=candidate.width or None,

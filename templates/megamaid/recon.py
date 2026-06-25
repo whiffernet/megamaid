@@ -278,13 +278,9 @@ async def probe_sitemap(
                     child_resp = await client.get(children[0].text, timeout=15.0)
                     requests_made += 1
                     child_text = _sitemap_text(child_resp, children[0].text)
-                    child_root = ET.fromstring(
-                        child_text.encode("utf-8", errors="replace")
-                    )
+                    child_root = ET.fromstring(child_text.encode("utf-8", errors="replace"))
                     urls = [
-                        loc.text
-                        for loc in child_root.findall("sm:url/sm:loc", _SM_NS)
-                        if loc.text
+                        loc.text for loc in child_root.findall("sm:url/sm:loc", _SM_NS) if loc.text
                     ]
                 except Exception:
                     pass
@@ -310,9 +306,7 @@ async def probe_sitemap(
             )
 
         elif tag == "urlset":
-            urls = [
-                loc.text for loc in root.findall("sm:url/sm:loc", _SM_NS) if loc.text
-            ]
+            urls = [loc.text for loc in root.findall("sm:url/sm:loc", _SM_NS) if loc.text]
             has_image = "<image:image" in text
             has_lastmod = "<lastmod>" in text
 
@@ -390,18 +384,14 @@ def probe_anti_bot(resp: httpx.Response, original_domain: str = "") -> ProbeResu
         if "challenges.cloudflare.com" in body or "cf-mitigated" in headers:
             severity = "blocking"
             signals.append("challenge page detected")
-        detections.append(
-            {"system": "cloudflare", "severity": severity, "signals": signals}
-        )
+        detections.append({"system": "cloudflare", "severity": severity, "signals": signals})
 
     # Akamai
     if "x-akamai-transformed" in headers or "akamai-grn" in headers:
         signals = [k for k in ("x-akamai-transformed", "akamai-grn") if k in headers]
         if "_abck" in cookies:
             signals.append("_abck cookie")
-        detections.append(
-            {"system": "akamai", "severity": "monitoring", "signals": signals}
-        )
+        detections.append({"system": "akamai", "severity": "monitoring", "signals": signals})
 
     # PerimeterX
     px_headers = [k for k in headers if k.startswith("x-px")]
@@ -409,9 +399,7 @@ def probe_anti_bot(resp: httpx.Response, original_domain: str = "") -> ProbeResu
         signals = px_headers + (["_pxhd cookie"] if "_pxhd" in cookies else [])
         if "client.perimeterx.net" in body:
             signals.append("client.perimeterx.net in body")
-        detections.append(
-            {"system": "perimeterx", "severity": "blocking", "signals": signals}
-        )
+        detections.append({"system": "perimeterx", "severity": "blocking", "signals": signals})
 
     # DataDome
     if "x-datadome" in headers or "datadome" in cookies:
@@ -420,16 +408,12 @@ def probe_anti_bot(resp: httpx.Response, original_domain: str = "") -> ProbeResu
             signals.append("x-datadome header")
         if "datadome" in cookies:
             signals.append("datadome cookie")
-        detections.append(
-            {"system": "datadome", "severity": "blocking", "signals": signals}
-        )
+        detections.append({"system": "datadome", "severity": "blocking", "signals": signals})
 
     # Kasada
     kp_headers = [k for k in headers if k.startswith("x-kpsdk")]
     if kp_headers:
-        detections.append(
-            {"system": "kasada", "severity": "blocking", "signals": kp_headers}
-        )
+        detections.append({"system": "kasada", "severity": "blocking", "signals": kp_headers})
 
     # Imperva/Incapsula
     if "x-iinfo" in headers or "incap_ses_" in cookies:
@@ -438,9 +422,7 @@ def probe_anti_bot(resp: httpx.Response, original_domain: str = "") -> ProbeResu
             signals.append("x-iinfo header")
         if "incap_ses_" in cookies:
             signals.append("incap_ses_ cookie")
-        detections.append(
-            {"system": "imperva", "severity": "monitoring", "signals": signals}
-        )
+        detections.append({"system": "imperva", "severity": "monitoring", "signals": signals})
 
     if not detections:
         return ProbeResult(
@@ -525,9 +507,7 @@ def probe_structured_data(html: str) -> ProbeResult:
     # Search form: <form action="/search"> or <input name="q">/name="query"/name="search">
     has_search_form = bool(
         re.search(r'<form[^>]+action=["\'][^"\']*(?:search|/s/|/find)', html, re.I)
-        or re.search(
-            r'<input[^>]+name=["\'](?:q|query|search|keyword)["\']', html, re.I
-        )
+        or re.search(r'<input[^>]+name=["\'](?:q|query|search|keyword)["\']', html, re.I)
     )
 
     if (
@@ -720,9 +700,7 @@ def probe_rendering(html: str) -> ProbeResult:
 
     # SPA shell detection: <div id="root"></div> or <div id="app"></div>
     # with very little text content
-    has_root_div = bool(
-        re.search(r'<div\s+id="(root|app|__next)"[^>]*>\s*</div>', html, re.I)
-    )
+    has_root_div = bool(re.search(r'<div\s+id="(root|app|__next)"[^>]*>\s*</div>', html, re.I))
     script_count = html.lower().count("<script")
     has_noscript = "<noscript" in html.lower()
     needs_js = has_root_div and text_ratio < 0.05
@@ -812,14 +790,10 @@ def score_patterns(probes: list[ProbeResult]) -> list[PatternScore]:
         if sm.details.get("exists"):
             url_count = sm.details.get("url_count", 0)
             scores["sitemap_crawl"] += 40
-            reasons["sitemap_crawl"].append(
-                f"Sitemap found with {url_count} URLs (+40)"
-            )
+            reasons["sitemap_crawl"].append(f"Sitemap found with {url_count} URLs (+40)")
             if url_count > 100:
                 scores["sitemap_crawl"] += 20
-                reasons["sitemap_crawl"].append(
-                    f"Large sitemap ({url_count}+ URLs, +20)"
-                )
+                reasons["sitemap_crawl"].append(f"Large sitemap ({url_count}+ URLs, +20)")
             if sm.details.get("has_image_tags"):
                 scores["image_downloads"] += 15
                 reasons["image_downloads"].append("Sitemap has image:image tags (+15)")
@@ -845,9 +819,7 @@ def score_patterns(probes: list[ProbeResult]) -> list[PatternScore]:
             scores["spa_hydration"] += 25
             reasons["spa_hydration"].append("Page needs JS rendering (+25)")
             scores["paginated_html"] -= 20
-            reasons["paginated_html"].append(
-                "Needs JS, static scraping unreliable (-20)"
-            )
+            reasons["paginated_html"].append("Needs JS, static scraping unreliable (-20)")
             scores["sitemap_crawl"] -= 10
             reasons["sitemap_crawl"].append("Needs JS for page content (-10)")
         elif rend.details.get("text_ratio", 0) > 0.1:
@@ -893,9 +865,7 @@ def score_patterns(probes: list[ProbeResult]) -> list[PatternScore]:
     )
     if has_search_form and not sm_exists and not fw_detected:
         scores["search_seed"] += 35
-        reasons["search_seed"].append(
-            "Search form + no sitemap + no framework API (+35)"
-        )
+        reasons["search_seed"].append("Search form + no sitemap + no framework API (+35)")
     elif has_search_form:
         # Minor signal — search form exists but better patterns are also in play.
         scores["search_seed"] += 10
@@ -906,13 +876,9 @@ def score_patterns(probes: list[ProbeResult]) -> list[PatternScore]:
     if ab and ab.details:
         if ab.details.get("severity") == "blocking":
             scores["spa_hydration"] += 10
-            reasons["spa_hydration"].append(
-                "Anti-bot blocking — browser may help (+10)"
-            )
+            reasons["spa_hydration"].append("Anti-bot blocking — browser may help (+10)")
             scores["rest_json_api"] -= 15
-            reasons["rest_json_api"].append(
-                "Anti-bot blocking — API likely blocked too (-15)"
-            )
+            reasons["rest_json_api"].append("Anti-bot blocking — API likely blocked too (-15)")
 
     # --- Auth detection (from homepage response) ---
     # If robots probe found auth redirect signals, boost auth_wall
@@ -931,9 +897,7 @@ def score_patterns(probes: list[ProbeResult]) -> list[PatternScore]:
         s = max(scores[pattern], 0)
         conf = "high" if s >= 70 else "medium" if s >= 40 else "low"
         r = [x for x in reasons[pattern] if x]
-        results.append(
-            PatternScore(pattern=pattern, score=s, confidence=conf, reasons=r)
-        )
+        results.append(PatternScore(pattern=pattern, score=s, confidence=conf, reasons=r))
 
     results.sort(key=lambda x: x.score, reverse=True)
     return results
@@ -1034,9 +998,7 @@ async def run_recon(
 
         # 2. Sitemap
         known_sitemaps = (
-            robots_result.details.get("sitemap_urls", [])
-            if robots_result.details
-            else []
+            robots_result.details.get("sitemap_urls", []) if robots_result.details else []
         )
         sitemap_result = await probe_sitemap(client, base_url, known_sitemaps)
         probes.append(sitemap_result)
@@ -1057,9 +1019,7 @@ async def run_recon(
                     for r in homepage_resp.history
                 )
             ):
-                warnings.append(
-                    "Site redirects to login — may require auth_wall pattern"
-                )
+                warnings.append("Site redirects to login — may require auth_wall pattern")
         except Exception as exc:
             warnings.append(f"Could not fetch homepage: {exc}")
 
@@ -1068,9 +1028,7 @@ async def run_recon(
             probes.append(probe_anti_bot(homepage_resp, original_domain=domain))
         else:
             probes.append(
-                ProbeResult(
-                    name="anti_bot", status="skip", summary="No homepage response"
-                )
+                ProbeResult(name="anti_bot", status="skip", summary="No homepage response")
             )
 
         probes.append(probe_structured_data(homepage_html))
@@ -1153,9 +1111,7 @@ def format_text_report(report: ReconReport) -> str:
     if report.alternative_patterns:
         lines.append("  Alternatives:")
         for alt in report.alternative_patterns[:3]:
-            lines.append(
-                f"    {alt.pattern} ({alt.confidence}, score: {alt.score:.0f})"
-            )
+            lines.append(f"    {alt.pattern} ({alt.confidence}, score: {alt.score:.0f})")
         lines.append("")
 
     lines.append(f"  Rate limit: {report.recommended_rate_limit}s")
@@ -1231,8 +1187,6 @@ def _count_path_prefixes(urls: list[str], depth: int = 2) -> dict[str, int]:
     for url in urls:
         path = urlparse(url).path.strip("/")
         parts = path.split("/")
-        prefix = (
-            "/" + "/".join(parts[:depth]) + "/" if len(parts) >= depth else "/" + path
-        )
+        prefix = "/" + "/".join(parts[:depth]) + "/" if len(parts) >= depth else "/" + path
         counts[prefix] = counts.get(prefix, 0) + 1
     return dict(sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10])

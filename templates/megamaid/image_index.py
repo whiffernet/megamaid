@@ -15,7 +15,6 @@ from pathlib import Path
 
 from .models import ImageRef
 
-
 # An index entry seen within this many days is trusted without revalidation.
 FRESHNESS_DAYS = 30
 
@@ -148,10 +147,7 @@ class ImageIndex:
         if not path.exists():
             return cls()
         data = json.loads(path.read_text())
-        entries = {
-            url: IndexEntry.from_dict(rec)
-            for url, rec in data.get("entries", {}).items()
-        }
+        entries = {url: IndexEntry.from_dict(rec) for url, rec in data.get("entries", {}).items()}
         return cls(entries)
 
 

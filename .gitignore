@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Coverage / scratch
+.coverage
+htmlcov/
+
+# Scraper output
+staging/
+
+# Secrets
+.env
+.secrets/

@@ -29,10 +29,9 @@ from typing import Annotated
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
-from pydantic import Field
-
 from megamaid.manifest import Manifest
 from megamaid.recon import run_recon
+from pydantic import Field
 
 # ---------------------------------------------------------------------------
 # Config
@@ -63,8 +62,7 @@ def _load_secret(name: str, env_var: str | None = None) -> str:
     if local_path.exists():
         return local_path.read_text().strip()
     raise FileNotFoundError(
-        f"Secret '{name}' not found. Checked {secret_path}, "
-        f"env:{env_var or 'N/A'}, {local_path}"
+        f"Secret '{name}' not found. Checked {secret_path}, env:{env_var or 'N/A'}, {local_path}"
     )
 
 
@@ -177,7 +175,8 @@ def _load_new_changed_docs(run_dir: Path, summary_only: bool) -> tuple[list, lis
         except Exception:
             pass
 
-    new_docs, changed_docs = [], []
+    new_docs: list[dict] = []
+    changed_docs: list[dict] = []
     for doc_file in sorted(docs_dir.glob("*.json")):
         try:
             data = json.loads(doc_file.read_text())
@@ -219,9 +218,7 @@ def _latest_run_dir(staging_dir: Path) -> Path | None:
 
 @mcp.tool
 async def megamaid_recon(
-    url: Annotated[
-        str, Field(description="Target URL to probe (e.g. https://example.com)")
-    ],
+    url: Annotated[str, Field(description="Target URL to probe (e.g. https://example.com)")],
 ) -> dict:
     """Probe a URL and recommend a megamaid scraping pattern.
 
@@ -282,8 +279,7 @@ async def megamaid_run(
         bool,
         Field(
             description=(
-                "Truncate content_md to 500 characters per doc. "
-                "Ignored when include_docs=False."
+                "Truncate content_md to 500 characters per doc. Ignored when include_docs=False."
             )
         ),
     ] = True,
@@ -332,9 +328,7 @@ async def megamaid_run(
 
     run_id = manifest_path.parent.name if manifest_path else ""
     target_name = manifest_path.parent.parent.name if manifest_path else ""
-    staging_dir_str = (
-        str(manifest_path.parent) if manifest_path else str(project_path / "staging")
-    )
+    staging_dir_str = str(manifest_path.parent) if manifest_path else str(project_path / "staging")
 
     response: dict = {
         "run_id": run_id,
@@ -344,9 +338,7 @@ async def megamaid_run(
     }
 
     if include_docs and manifest_path:
-        new_docs, changed_docs = _load_new_changed_docs(
-            manifest_path.parent, summary_only
-        )
+        new_docs, changed_docs = _load_new_changed_docs(manifest_path.parent, summary_only)
         response["new_docs"] = new_docs
         response["changed_docs"] = changed_docs
 
@@ -421,8 +413,7 @@ async def megamaid_list_docs(
         str | None,
         Field(
             description=(
-                "Specific run ID (e.g. '20260418T120000Z'). "
-                "Defaults to the most recent run."
+                "Specific run ID (e.g. '20260418T120000Z'). Defaults to the most recent run."
             )
         ),
     ] = None,
