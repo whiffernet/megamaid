@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Non-root user for security
 RUN groupadd -r mcp && useradd -r -g mcp -s /bin/false mcp
