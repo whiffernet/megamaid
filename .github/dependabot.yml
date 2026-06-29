@@ -1,10 +1,25 @@
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: "/"
-    schedule: { interval: weekly }
-    labels: ["dependencies"]
-  - package-ecosystem: docker
-    directory: "/mcp"
-    schedule: { interval: weekly }
-    labels: ["dependencies"]
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: weekly
+  labels:
+  - dependencies
+  groups:
+    github-actions:
+      patterns:
+      - '*'
+- package-ecosystem: docker
+  directory: /mcp
+  schedule:
+    interval: weekly
+  labels:
+  - dependencies
+  groups:
+    docker-minor-patch:
+      patterns:
+      - '*'
+      update-types:
+      - minor
+      - patch
