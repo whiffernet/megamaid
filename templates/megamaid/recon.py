@@ -28,7 +28,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
-from .base import DEFAULT_USER_AGENT
+from .constants import DEFAULT_USER_AGENT
 
 logger = logging.getLogger(__name__)
 

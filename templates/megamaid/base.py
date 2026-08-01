@@ -17,16 +17,13 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import Browser, Page, async_playwright
 
+from .constants import DEFAULT_USER_AGENT
 from .models import ScrapedDoc
 
 if TYPE_CHECKING:
     import httpx
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_USER_AGENT = (
-    "megamaid/0.1 (+https://github.com/whiffernet/megamaid) Mozilla/5.0 (compatible; Chromium/131)"
-)
 
 
 class BaseScraper(ABC):
