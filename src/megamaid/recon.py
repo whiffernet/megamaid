@@ -28,7 +28,17 @@ from xml.etree import ElementTree as ET
 import httpx
 
 from .constants import DEFAULT_USER_AGENT
-from .netguard import NetGuardError, assert_public_url, guard_request, safe_gunzip
+from .netguard import (
+    MAX_COMPRESSED_BYTES,
+    NetGuardError,
+    assert_public_url,
+    guard_request,
+    safe_gunzip,
+)
+
+# Ceiling on any single response body recon will accept. Shares netguard's
+# 8 MB number so there is one knob for "the largest payload recon will hold".
+MAX_RESPONSE_BYTES = MAX_COMPRESSED_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +134,71 @@ class ReconReport:
 
 
 # ---------------------------------------------------------------------------
+# Bounded fetch
+# ---------------------------------------------------------------------------
+
+
+async def _get_capped(
+    client: httpx.AsyncClient,
+    url: str,
+    timeout: float,
+    limit: int = MAX_RESPONSE_BYTES,
+) -> httpx.Response:
+    """GET `url`, accepting at most `limit` bytes of response body.
+
+    Every fetch in this module goes through here. recon parses
+    attacker-controlled pages by design and `megamaid_recon` runs inside the
+    MCP server's own process; the retired container's ``mem_limit: 512m`` used
+    to bound that incidentally, and it is gone in the same branch that made
+    the server a host process. `safe_gunzip` landed as one half of this
+    control — capping decompression — but the response body itself was still
+    read whole (`resp.text`, `resp.content`), so a multi-GB reply took the
+    server down with it.
+
+    Two things this does that the obvious alternatives do not:
+
+    * httpx's ``timeout`` bounds *idle time*, not transfer size — a steady
+      multi-GB stream never trips it.
+    * A ``Content-Length`` pre-check is not sufficient on its own: a chunked
+      response omits the header entirely. The body is counted as it arrives
+      instead, so the read stops at the cap no matter what the headers claim.
+
+    ``aiter_bytes`` yields content-decoded bytes, so this also bounds a
+    ``Content-Encoding: gzip`` bomb, which expands before it is counted.
+
+    Args:
+        client: shared httpx async client — its guard_request hook still fires
+            on every hop, redirects included.
+        url: absolute URL to fetch.
+        timeout: per-request timeout in seconds.
+        limit: maximum body bytes to accept.
+
+    Returns:
+        The response, with `.content`/`.text` populated from the capped read.
+
+    Raises:
+        NetGuardError: MM-43 when the body runs past `limit`. Callers treat
+            this like any other fetch failure and degrade the probe.
+    """
+    async with client.stream("GET", url, timeout=timeout) as resp:
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.aiter_bytes():
+            total += len(chunk)
+            if total > limit:
+                raise NetGuardError(
+                    "MM-43",
+                    f"Response body from {url} exceeds the {limit}-byte cap",
+                )
+            chunks.append(chunk)
+        # Exactly what httpx's own Response.aread() does with the result of
+        # aiter_bytes(); aread() itself cannot be used because it is
+        # unbounded, which is the whole point of this function.
+        resp._content = b"".join(chunks)
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # Probes
 # ---------------------------------------------------------------------------
 
@@ -144,7 +219,7 @@ async def probe_robots(client: httpx.AsyncClient, base_url: str) -> ProbeResult:
     robots_url = f"{origin}/robots.txt"
 
     try:
-        resp = await client.get(robots_url, timeout=10.0)
+        resp = await _get_capped(client, robots_url, timeout=10.0)
     except Exception as exc:
         return ProbeResult(
             name="robots_txt",
@@ -249,7 +324,7 @@ async def probe_sitemap(
     requests_made = 0
     for sitemap_url in candidates[:2]:
         try:
-            resp = await client.get(sitemap_url, timeout=15.0)
+            resp = await _get_capped(client, sitemap_url, timeout=15.0)
             requests_made += 1
         except Exception:
             continue
@@ -275,7 +350,7 @@ async def probe_sitemap(
             # Fetch first child to sample URLs
             if children and children[0].text:
                 try:
-                    child_resp = await client.get(children[0].text, timeout=15.0)
+                    child_resp = await _get_capped(client, children[0].text, timeout=15.0)
                     requests_made += 1
                     child_text = _sitemap_text(child_resp, children[0].text)
                     child_root = ET.fromstring(child_text.encode("utf-8", errors="replace"))
@@ -634,7 +709,7 @@ async def probe_api_endpoints(
 
     for curl in confirm_urls[:2]:
         try:
-            cresp = await client.get(curl, timeout=10.0)
+            cresp = await _get_capped(client, curl, timeout=10.0)
             requests_made += 1
             ct = cresp.headers.get("content-type", "")
             endpoints.append(
@@ -1023,7 +1098,7 @@ async def run_recon(
         homepage_html = ""
         homepage_resp = None
         try:
-            homepage_resp = await client.get(url, timeout=timeout)
+            homepage_resp = await _get_capped(client, url, timeout=timeout)
             homepage_html = homepage_resp.text[:200_000]
 
             # Check for auth redirect
