@@ -21,6 +21,14 @@ mcp = [
     "httpx>=0.27",
     "pydantic>=2.5",
 ]
+# The URL-scoped CLI commands (recon, map, init) — runnable from the state venv
+# with no project and no browser. Project-scoped commands (suck, status, diff,
+# export) need the project's own targets/ package and live in [scraper].
+cli = [
+    "click>=8.1",
+    "httpx>=0.27",
+    "pydantic>=2.5",
+]
 scraper = [
     "playwright>=1.48",
     "beautifulsoup4>=4.12",

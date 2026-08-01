@@ -1,6 +1,8 @@
 """The [mcp] extra must stay light — it is installed inside the MCP connect budget."""
 
 import json
+import subprocess
+import sys
 import tomllib
 
 
@@ -41,3 +43,49 @@ def test_version_is_sourced_from_plugin_manifest(repo_root):
     assert "version" in project["dynamic"]
     manifest = json.loads((repo_root / ".claude-plugin" / "plugin.json").read_text())
     assert manifest["version"] == "0.9.0"
+
+
+def test_cli_extra_contains_click_and_excludes_heavy_scraper_dependencies(repo_root):
+    """[cli] serves the URL-scoped commands from the state venv — click, no browser."""
+    extras = _pyproject(repo_root)["project"]["optional-dependencies"]
+    named = {dep.split(">")[0].split("=")[0].split("[")[0].strip() for dep in extras["cli"]}
+    assert "click" in named
+    assert not (named & HEAVY), f"[cli] must stay light; found {named & HEAVY}"
+
+
+def test_megamaid_cli_importable_with_mcp_and_cli_extras_only(repo_root):
+    """megamaid.cli must import cleanly from the state venv, which never gets [scraper].
+
+    A later task's launcher execs <venv>/bin/megamaid for URL-scoped commands
+    (recon, map, init) out of a venv built with [mcp,cli] only. If importing
+    megamaid.cli reaches playwright at module scope, that binary is unusable.
+    Runs in a fresh subprocess so we measure the real import graph, not
+    whatever pytest happens to have cached in sys.modules.
+    """
+    cli_path = repo_root / "src" / "megamaid" / "cli.py"
+    assert cli_path.exists(), f"missing runtime module {cli_path}"
+    runtime_parent = cli_path.parent.parent  # src/
+
+    script = f"""
+import sys
+sys.path.insert(0, {str(runtime_parent)!r})
+import megamaid.cli
+print('PLAYWRIGHT_LOADED' if 'playwright' in sys.modules else 'CLEAN')
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, (
+        f"megamaid.cli import failed with exit code {result.returncode}. stderr: {result.stderr}"
+    )
+
+    assert result.stdout.strip() == "CLEAN", (
+        f"Importing megamaid.cli loaded playwright into sys.modules. "
+        f"This breaks the state-venv URL-scoped CLI commands. "
+        f"stdout: {result.stdout}, stderr: {result.stderr}"
+    )

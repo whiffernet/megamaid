@@ -22,7 +22,6 @@ from urllib.robotparser import RobotFileParser
 
 import click
 
-from .base import create_browser
 from .image_index import ImageIndex
 from .manifest import Manifest, ManifestItem, compute_delta, get_latest_manifest
 from .models import slug_from_url
@@ -220,6 +219,8 @@ def suck(max_items: int | None, ignore_robots: bool, staging: Path) -> None:
     manifest.save(manifest_path)
 
     async def _run() -> None:
+        from .base import create_browser
+
         pw, browser = await create_browser()
         target._debug_dir = debug_dir
         target._images_dir = images_dir
