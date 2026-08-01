@@ -20,7 +20,6 @@ logged before slow work starts so /megamaid-doctor can explain a killed run.
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import pathlib
@@ -217,15 +216,23 @@ def ensure_venv(
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Ensure the venv, then exec the MCP server."""
-    parser = argparse.ArgumentParser(prog="megamaid-launch", add_help=False)
-    parser.parse_known_args(argv)
+    """Ensure the venv, then exec either the MCP server or the CLI.
+
+    Args:
+        argv: argument list excluding the program name. `--cli` must be first
+            when present; everything after it is forwarded to `megamaid`
+            untouched, so megamaid's own flags (e.g. `--dry-run`) never reach
+            this launcher's own argument handling.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    cli_mode = bool(args) and args[0] == "--cli"
+    forwarded = args[1:] if cli_mode else []
 
     root = plugin_root()
     try:
         version = plugin_version(root)
         bin_dir = ensure_venv(root, state_dir() / "venv", version)
-        target = bin_dir / "megamaid-mcp"
+        target = bin_dir / ("megamaid" if cli_mode else "megamaid-mcp")
         if not _is_executable(target):
             # Defence in depth: ensure_venv already verified this before
             # stamping, but the file could have been removed since then.
@@ -239,7 +246,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"\n  ✗  [{err.code}] {err.message}\n\n     Fix: {err.fix}\n", file=sys.stderr)
         raise SystemExit(1)
 
-    os.execv(str(target), [str(target)])
+    os.execv(str(target), [str(target), *forwarded])
 
 
 if __name__ == "__main__":

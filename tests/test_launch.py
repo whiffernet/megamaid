@@ -183,3 +183,53 @@ def test_ensure_venv_requires_entry_points_before_stamping(repo_root, tmp_path):
         mod.ensure_venv(repo_root, venv, "0.9.0", runner=runner, log=lambda m: None)
     assert excinfo.value.code == "MM-16"
     assert not (venv / ".plugin-version").exists()
+
+
+def test_cli_mode_targets_the_megamaid_script(repo_root, tmp_path, monkeypatch):
+    mod = _load(repo_root)
+    monkeypatch.setenv("MEGAMAID_STATE_DIR", str(tmp_path))
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / ".plugin-version").write_text("0.9.0\n")
+    # Must be executable, not just present: main()'s exec guard checks X_OK
+    # before calling os.execv, so a plain write_text() (mode 0644) would trip
+    # the guard and never reach the exec call this test is asserting on.
+    _stub_entry_points(venv)
+
+    captured = {}
+    monkeypatch.setattr(mod.os, "execv", lambda path, args: captured.update(path=path, args=args))
+    mod.main(["--cli", "recon", "https://example.com"])
+
+    assert captured["path"].endswith("/bin/megamaid")
+    assert captured["args"][1:] == ["recon", "https://example.com"]
+
+
+def test_default_mode_targets_the_mcp_script(repo_root, tmp_path, monkeypatch):
+    mod = _load(repo_root)
+    monkeypatch.setenv("MEGAMAID_STATE_DIR", str(tmp_path))
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / ".plugin-version").write_text("0.9.0\n")
+    _stub_entry_points(venv)
+
+    captured = {}
+    monkeypatch.setattr(mod.os, "execv", lambda path, args: captured.update(path=path, args=args))
+    mod.main([])
+
+    assert captured["path"].endswith("/bin/megamaid-mcp")
+
+
+def test_cli_mode_passes_flags_through_untouched(repo_root, tmp_path, monkeypatch):
+    """--dry-run belongs to megamaid, not to the launcher's own parser."""
+    mod = _load(repo_root)
+    monkeypatch.setenv("MEGAMAID_STATE_DIR", str(tmp_path))
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / ".plugin-version").write_text("0.9.0\n")
+    _stub_entry_points(venv)
+
+    captured = {}
+    monkeypatch.setattr(mod.os, "execv", lambda path, args: captured.update(path=path, args=args))
+    mod.main(["--cli", "upgrade", "--dry-run", "~/megamaid-foo"])
+
+    assert captured["args"][1:] == ["upgrade", "--dry-run", "~/megamaid-foo"]
