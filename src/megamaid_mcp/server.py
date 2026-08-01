@@ -6,8 +6,10 @@ Exposes four tools:
   megamaid_status     — latest run stats for a project (disk read, no network)
   megamaid_list_docs  — list scraped docs from a run (disk read, no network)
 
-Projects are read from MEGAMAID_PROJECTS_DIR_INTERNAL (default /projects).
-Pass either a bare name ("megamaid-walmart") or an absolute path.
+Projects live on the host filesystem. Pass either an absolute path
+("/home/you/megamaid-walmart", "~/megamaid-walmart") or a bare name
+("megamaid-walmart"), which is resolved under MEGAMAID_PROJECTS_DIR
+(default: the user's home directory).
 
 Transport is stdio ONLY, and that is load-bearing. FastMCP binds auth at
 construction, so a network listener here would be unauthenticated on every
@@ -19,7 +21,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -38,7 +39,11 @@ from megamaid.recon import run_recon
 # Config
 # ---------------------------------------------------------------------------
 
-PROJECTS_DIR = Path(os.environ.get("MEGAMAID_PROJECTS_DIR_INTERNAL", "/projects"))
+# Where a bare project *name* is resolved. This used to default to the retired
+# Docker container's mount point, which does not exist on a host; the natural
+# root here is the user's home directory. An absolute path argument bypasses
+# this entirely — see _resolve_project.
+PROJECTS_DIR = Path(os.environ.get("MEGAMAID_PROJECTS_DIR", "~")).expanduser()
 TIMEOUT = float(os.environ.get("MEGAMAID_TIMEOUT", "300"))
 
 # stderr, not stdout, is mandatory here. stdout is the JSON-RPC wire for a
@@ -67,56 +72,89 @@ mcp = FastMCP(name="megamaid")
 
 
 def _resolve_project(project: str) -> Path:
-    """Resolve a project name or path to a validated container path."""
-    p = Path(project)
-    if not p.is_absolute():
-        p = PROJECTS_DIR / project
-    try:
-        p.resolve().relative_to(PROJECTS_DIR.resolve())
-    except ValueError:
-        raise ToolError(f"project must be within {PROJECTS_DIR} — got: {project!r}")
-    if not p.exists():
+    """Resolve a project name or path to an existing directory on this host.
+
+    Two accepted forms:
+
+    * an **absolute path** (``/home/you/megamaid-walmart``, or ``~/...``,
+      which expands first) — honoured as given, anywhere the caller can read.
+    * a **bare name** (``megamaid-walmart``) — resolved under PROJECTS_DIR and
+      required to stay under it.
+
+    The containment check survives only for the bare-name form, and it is a
+    *correctness* guard, not a security boundary. This server is a stdio
+    subprocess running as the user, with exactly the user's own filesystem
+    rights, and megamaid_run already hands control to a script inside the
+    resolved project — a path check cannot fence in a caller who could just as
+    easily read the file directly. Confining every path to one root on such a
+    host buys no privilege separation; it only breaks the absolute-path form,
+    which is what this fix restores. What containment still buys is that a
+    *name* stays a name: ``"../../etc"`` cannot quietly mean something other
+    than a sibling of the other scraped projects.
+
+    Args:
+        project: bare project directory name, or an absolute (or ``~``-rooted)
+            path to the project.
+
+    Returns:
+        The resolved, existing project directory.
+
+    Raises:
+        ToolError: when a bare name escapes PROJECTS_DIR, or the directory
+            does not exist.
+    """
+    p = Path(project).expanduser()
+    if p.is_absolute():
+        resolved = p.resolve()
+    else:
+        resolved = (PROJECTS_DIR / p).resolve()
+        try:
+            resolved.relative_to(PROJECTS_DIR.resolve())
+        except ValueError:
+            raise ToolError(
+                f"project name {project!r} escapes the projects root {PROJECTS_DIR}. "
+                "Pass an absolute path if the project lives elsewhere."
+            )
+    if not resolved.exists():
         raise ToolError(
-            f"project not found: {p}. "
-            f"Confirm MEGAMAID_PROJECTS_DIR_INTERNAL={PROJECTS_DIR} is mounted correctly."
+            f"project not found: {resolved}. Pass an absolute path, or point "
+            f"MEGAMAID_PROJECTS_DIR (currently {PROJECTS_DIR}) at the directory "
+            "holding your scraped projects."
         )
-    return p
+    return resolved
 
 
-def _venv_cmd(project_path: Path) -> tuple[list[str], dict]:
-    """Return (command, env) to run megamaid suck in the project venv.
+def _project_cli(project_path: Path) -> list[str]:
+    """Return the command that runs a scraped project's own megamaid CLI.
 
-    Uses the container's Python (found via shutil.which) rather than the
-    venv's python3 symlink, which points to the host's /usr/bin/python3 —
-    a path that typically does not exist inside the container. The venv's
-    site-packages are injected via PYTHONPATH so project-specific deps work.
+    The console script's shebang already names the project venv's interpreter,
+    so executing it directly is all that is needed: the venv's site-packages
+    and its editable-install finder (which is what makes ``import targets``
+    resolve to the project's own targets/ package) come along automatically.
+
+    The previous form — the *server's* ``python3`` plus a hand-built
+    PYTHONPATH — was a workaround for a container that had no host interpreter
+    at the shebang's path. On a host it is wrong twice: it discards the venv's
+    interpreter, and it derived site-packages from the server's own
+    ``sys.version_info``, so a project venv on a different Python minor
+    silently contributed nothing.
+
+    Args:
+        project_path: resolved project directory.
+
+    Returns:
+        argv for subprocess, ready to have a subcommand appended.
+
+    Raises:
+        ToolError: when the project has no .venv/bin/megamaid.
     """
     script = project_path / ".venv" / "bin" / "megamaid"
     if not script.exists():
         raise ToolError(
             f"No .venv/bin/megamaid at {project_path}. "
-            "Set up first: python3 -m venv .venv && pip install -e ."
+            "Set up first: python3 -m venv .venv && .venv/bin/pip install -e ."
         )
-
-    python = shutil.which("python3") or "/usr/local/bin/python3"
-
-    # Build PYTHONPATH with two entries:
-    # 1. project_path — so `import targets` finds targets/hnrss.py (not the
-    #    example_target bundled in the container's megamaid package). The venv's
-    #    editable-install .pth file encodes the host path (/home/e/...) which
-    #    doesn't resolve inside the container, so we add the project root directly.
-    # 2. venv site-packages — for any project-specific deps (bs4, lxml, etc.)
-    ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
-    site_pkgs = project_path / ".venv" / "lib" / ver / "site-packages"
-    env = dict(os.environ)
-    parts = [str(project_path)]
-    if site_pkgs.exists():
-        parts.append(str(site_pkgs))
-    if existing := env.get("PYTHONPATH", ""):
-        parts.append(existing)
-    env["PYTHONPATH"] = ":".join(parts)
-
-    return [python, str(script)], env
+    return [str(script)]
 
 
 def _parse_suck_stdout(stdout: str) -> tuple[dict, Path | None]:
@@ -236,9 +274,9 @@ async def megamaid_run(
         str,
         Field(
             description=(
-                "Project directory name (e.g. 'megamaid-walmart') or absolute "
-                "container path. Must be a scaffolded megamaid project with "
-                ".venv/bin/megamaid present."
+                "Project directory name (e.g. 'megamaid-walmart', resolved "
+                "under MEGAMAID_PROJECTS_DIR) or an absolute path. Must be a "
+                "scaffolded megamaid project with .venv/bin/megamaid present."
             )
         ),
     ],
@@ -278,8 +316,7 @@ async def megamaid_run(
     """
     start = time.monotonic()
     project_path = _resolve_project(project)
-    base_cmd, env = _venv_cmd(project_path)
-    cmd = base_cmd + ["suck"]
+    cmd = _project_cli(project_path) + ["suck"]
     if max_items is not None:
         cmd += ["--max", str(max_items)]
 
@@ -290,7 +327,6 @@ async def megamaid_run(
             capture_output=True,
             text=True,
             timeout=TIMEOUT,
-            env=env,
         )
     except subprocess.TimeoutExpired:
         raise ToolError(f"megamaid suck timed out after {int(TIMEOUT)}s")
@@ -339,7 +375,7 @@ async def megamaid_run(
 async def megamaid_status(
     project: Annotated[
         str,
-        Field(description="Project directory name or absolute container path."),
+        Field(description="Project directory name or an absolute path to the project."),
     ],
 ) -> dict:
     """Return stats for the most recent run of a megamaid project.
@@ -387,7 +423,7 @@ async def megamaid_status(
 async def megamaid_list_docs(
     project: Annotated[
         str,
-        Field(description="Project directory name or absolute container path."),
+        Field(description="Project directory name or an absolute path to the project."),
     ],
     run_id: Annotated[
         str | None,
