@@ -121,7 +121,12 @@ def is_private_host(host: str) -> bool:
         candidates = [host]
     except ValueError:
         try:
-            candidates = [info[4][0] for info in socket.getaddrinfo(host, None)]
+            # info[4] is the sockaddr tuple: (address, port) for IPv4,
+            # (address, port, flowinfo, scope_id) for IPv6 — element 0 is the
+            # address string in both forms. Typeshed types it str | int
+            # (sockaddr is a generic tuple), so coerce explicitly; str() on an
+            # already-str value is a no-op.
+            candidates = [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
         except socket.gaierror:
             # Unresolvable: refuse rather than hand it to the HTTP client.
             return True
