@@ -215,6 +215,8 @@ megamaid/                            # the plugin repo
 │   └── references/                  # recon, etiquette, troubleshooting
 ├── src/megamaid/                    # runtime, vendored into each project
 ├── src/megamaid_mcp/                # MCP server (stdio)
+├── scripts/
+│   └── launch.py                    # stdlib-only venv bootstrap for the MCP server
 ├── templates/                       # scaffolded-project stub
 │   ├── pyproject.toml
 │   ├── README.md
