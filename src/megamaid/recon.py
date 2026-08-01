@@ -17,7 +17,6 @@ The scoring engine uses weighted signals from 54 tested sites (34 retail,
 from __future__ import annotations
 
 import asyncio
-import gzip
 import json
 import logging
 import re
@@ -29,6 +28,7 @@ from xml.etree import ElementTree as ET
 import httpx
 
 from .constants import DEFAULT_USER_AGENT
+from .netguard import NetGuardError, assert_public_url, guard_request, safe_gunzip
 
 logger = logging.getLogger(__name__)
 
@@ -967,10 +967,24 @@ async def run_recon(
 
     Returns:
         A ReconReport with all probe results and recommendations.
+
+    Raises:
+        NetGuardError: MM-42 when `url` itself targets a private or loopback
+            address. Redirects into private space mid-probe are caught by the
+            per-request guard hook instead, which downgrades the affected
+            probe to "skip" rather than aborting the whole recon — the same
+            resilience the orchestrator already gives any other network
+            failure.
     """
     parsed = urlparse(url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     domain = parsed.netloc
+
+    # Fail fast and loud on the obvious case: the target itself is private.
+    # This is deliberately in addition to, not instead of, guard_request on
+    # the client below — that hook is what catches a public page redirecting
+    # into private space mid-probe, which this upfront check cannot see.
+    assert_public_url(url)
 
     probes: list[ProbeResult] = []
     warnings: list[str] = []
@@ -979,6 +993,7 @@ async def run_recon(
         headers={"User-Agent": user_agent},
         follow_redirects=True,
         timeout=timeout,
+        event_hooks={"request": [guard_request]},
     ) as client:
         # 1. robots.txt
         robots_result = await probe_robots(client, base_url)
@@ -1164,8 +1179,8 @@ def _sitemap_text(resp: httpx.Response, url: str) -> str:
     is_gz = url.lower().endswith(".gz") or raw[:2] == b"\x1f\x8b"
     if is_gz:
         try:
-            raw = gzip.decompress(raw)
-        except (OSError, EOFError):
+            raw = safe_gunzip(raw, limit=500_000)
+        except NetGuardError:
             return ""
     try:
         return raw[:500_000].decode("utf-8", errors="replace")
