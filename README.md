@@ -102,7 +102,7 @@ See [`EXAMPLES.md`](EXAMPLES.md) for end-to-end walkthroughs: downloading produc
 
 > _"The radar's been jammed."_ _"Jammed? With what?"_ _"Raspberry jam, sir."_
 
-Most scraper bugs are the equivalent of raspberry jam. See `references/troubleshooting.md` for selector drift, timeouts, blocks, and the stealth workaround for anti-bot CDNs.
+Most scraper bugs are the equivalent of raspberry jam. See `skills/megamaid/references/troubleshooting.md` for selector drift, timeouts, blocks, and the stealth workaround for anti-bot CDNs.
 
 ## Installation
 
