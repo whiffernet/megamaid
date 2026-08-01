@@ -51,9 +51,7 @@ class PdfIndexTarget(BaseScraper):
         html = await page.content()
         soup = BeautifulSoup(html, "html.parser")
 
-        pdf_links = [
-            a["href"] for a in soup.select("a[href$='.pdf']") if a.get("href")
-        ]
+        pdf_links = [a["href"] for a in soup.select("a[href$='.pdf']") if a.get("href")]
         pdf_links = [
             href if href.startswith("http") else self.base_url.rstrip("/") + "/" + href.lstrip("/")
             for href in pdf_links

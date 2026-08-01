@@ -56,9 +56,7 @@ class SpaTarget(BaseScraper):
     async def _discover(self, page: Page) -> list[str]:
         await self._navigate(page, f"{self.base_url}/list")
         await page.wait_for_selector("a.item-link", timeout=15000)
-        links = await page.eval_on_selector_all(
-            "a.item-link", "els => els.map(e => e.href)"
-        )
+        links = await page.eval_on_selector_all("a.item-link", "els => els.map(e => e.href)")
         return list(set(links))
 
     def _parse(self, html: str, url: str) -> ScrapedDoc:

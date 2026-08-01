@@ -75,9 +75,7 @@ class AuthedTarget(BaseScraper):
 
     async def run(self, browser: Browser, max_items=None):
         if not STATE_PATH.exists():
-            raise RuntimeError(
-                "No storage_state.json — run scripts/login_once.py first."
-            )
+            raise RuntimeError("No storage_state.json — run scripts/login_once.py first.")
         context = await browser.new_context(storage_state=str(STATE_PATH))
         page = await context.new_page()
         try:

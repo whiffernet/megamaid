@@ -44,9 +44,7 @@ class MyTarget(BaseScraper):
 
             doc = await self._parse(page, url)
 
-            candidates = await discover_page_images(
-                page, min_width=self.image_min_width
-            )
+            candidates = await discover_page_images(page, min_width=self.image_min_width)
             doc.images = await download_images(
                 candidates,
                 self._images_dir,
@@ -91,8 +89,7 @@ DOM discovery entirely and build `ImageCandidate` objects from the JSON:
 from megamaid.images import ImageCandidate, download_images
 
 candidates = [
-    ImageCandidate(url=img["src"], alt_text=img.get("alt", ""))
-    for img in product.get("images", [])
+    ImageCandidate(url=img["src"], alt_text=img.get("alt", "")) for img in product.get("images", [])
 ]
 doc.images = await download_images(candidates, self._images_dir)
 ```
@@ -171,6 +168,7 @@ IP-based. Workaround:
 ```python
 from playwright.async_api import Browser
 from playwright_stealth import Stealth
+
 
 class ProtectedTarget(BaseScraper):
     async def run(self, browser: Browser, max_items=None):

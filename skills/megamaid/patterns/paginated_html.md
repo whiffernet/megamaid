@@ -52,9 +52,7 @@ class BooksToScrape(BaseScraper):
             for link in soup.select("article.product_pod h3 a"):
                 urls.append(f"{self.base_url}/catalogue/{link['href']}")
             next_btn = soup.select_one("li.next a")
-            index_url = (
-                f"{self.base_url}/catalogue/{next_btn['href']}" if next_btn else None
-            )
+            index_url = f"{self.base_url}/catalogue/{next_btn['href']}" if next_btn else None
         return urls
 
     async def _parse(self, page: Page, url: str) -> ScrapedDoc:

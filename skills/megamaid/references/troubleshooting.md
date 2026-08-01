@@ -84,6 +84,7 @@ interstitials, sudden shift to CAPTCHAs.
    from playwright.async_api import Browser
    from playwright_stealth import Stealth
 
+
    class ProtectedTarget(BaseScraper):
        async def run(self, browser: Browser, max_items=None):
            stealth = Stealth()

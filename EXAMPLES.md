@@ -155,8 +155,8 @@ result = await mcp_client.call_tool(
         "project": "megamaid-walmart-lego",
         "max_items": 20,
         "include_docs": True,
-        "summary_only": True
-    }
+        "summary_only": True,
+    },
 )
 
 # result["new_docs"] contains the 20 most recently changed Lego listings

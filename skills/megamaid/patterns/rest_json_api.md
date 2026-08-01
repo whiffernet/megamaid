@@ -141,6 +141,7 @@ GitHub-style APIs use `Link: <url>; rel="next"`:
 ```python
 import re
 
+
 async def _fetch_with_link(self, client, url):
     """Fetch JSON and parse Link header for next page URL."""
     await self._rate_limit()
@@ -185,6 +186,7 @@ Never hardcode API keys in the target class. Use environment variables:
 
 ```python
 import os
+
 API_KEY = os.environ["MY_API_KEY"]
 ```
 
@@ -249,25 +251,26 @@ class OpenLibrarySearch(BaseScraper):
         while True:
             data = await self._fetch_json(
                 client,
-                f"{self.base_url}/search.json?q={self.query}"
-                f"&offset={offset}&limit={limit}",
+                f"{self.base_url}/search.json?q={self.query}&offset={offset}&limit={limit}",
             )
             if not data or not data.get("docs"):
                 break
             for item in data["docs"]:
                 key = item.get("key", "")
-                docs.append(ScrapedDoc(
-                    id=key.replace("/", "-").strip("-"),
-                    source_url=f"{self.base_url}{key}",
-                    title=item.get("title", ""),
-                    content_md="",
-                    metadata={
-                        "author": item.get("author_name", []),
-                        "first_publish_year": item.get("first_publish_year"),
-                        "edition_count": item.get("edition_count"),
-                        "subject": item.get("subject", [])[:10],
-                    },
-                ))
+                docs.append(
+                    ScrapedDoc(
+                        id=key.replace("/", "-").strip("-"),
+                        source_url=f"{self.base_url}{key}",
+                        title=item.get("title", ""),
+                        content_md="",
+                        metadata={
+                            "author": item.get("author_name", []),
+                            "first_publish_year": item.get("first_publish_year"),
+                            "edition_count": item.get("edition_count"),
+                            "subject": item.get("subject", [])[:10],
+                        },
+                    )
+                )
                 if max_items and len(docs) >= max_items:
                     return docs
             offset += limit

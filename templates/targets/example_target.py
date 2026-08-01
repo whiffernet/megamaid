@@ -14,9 +14,10 @@ the matching playbook under the megamaid skill's patterns/ directory:
 
 from __future__ import annotations
 
+from playwright.async_api import Page
+
 from megamaid.base import BaseScraper
 from megamaid.models import ScrapedDoc, slug_from_url
-from playwright.async_api import Page
 
 
 class ExampleTarget(BaseScraper):
