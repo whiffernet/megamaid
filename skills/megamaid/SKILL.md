@@ -136,16 +136,20 @@ Read `references/recon.md` if the target doesn't fit cleanly.
 
 ### 3. Scaffold the project
 
-Copy the runtime from `src/megamaid/` and the project stub from `templates/`
-into the user's working directory (or a subdirectory named after the target). After copying:
+Copy the runtime from `${CLAUDE_PLUGIN_ROOT}/src/megamaid/` and the project
+stub from `${CLAUDE_PLUGIN_ROOT}/templates/` into the user's working directory
+(or a subdirectory named after the target). Both paths need the
+`${CLAUDE_PLUGIN_ROOT}/` prefix — written bare they would resolve against the
+user's current directory, not the installed plugin. After copying:
 
 1. Rename `targets/example_target.py` to `targets/<slug>.py`.
 2. Edit `pyproject.toml` — set `name` and the console script entry.
-3. Stamp the skill version: write the contents of this skill's `VERSION`
-   file into `.megamaid-version` at the project root. This records which
-   megamaid version the project was scaffolded from, so later you can see
-   how far its copied `megamaid/` runtime has drifted from the current
-   skill. (A project with no `.megamaid-version` predates this scheme.)
+3. Stamp the plugin version: read the `version` field from
+   `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and write it to
+   `.megamaid-version` at the project root. This records which megamaid
+   version the project was scaffolded from, so later you can see how far its
+   copied `megamaid/` runtime has drifted from the current plugin. (A project
+   with no `.megamaid-version` predates this scheme.)
 4. Tell the user to run: `python -m venv .venv && source .venv/bin/activate && pip install -e . && playwright install chromium`.
 
 ### 4. Write the target class
@@ -156,15 +160,17 @@ Open the matching playbook from `patterns/`. Implement **only**:
 - `scrape(page)` — parse one page, return `list[ScrapedDoc]`
 
 Every other concern — rate limiting, retries, screenshots on error,
-manifest, delta detection — is already in `templates/base.py`. Don't
-reinvent it.
+manifest, delta detection — is already in
+`${CLAUDE_PLUGIN_ROOT}/src/megamaid/base.py`, which step 3 copied into the
+project as `megamaid/base.py`. Don't reinvent it.
 
 Defaults:
 
 - `rate_limit_seconds = 2.0` for small/independent sites, `1.0` for
   large commercial sites with obvious bot tolerance.
-- Default User-Agent from `templates/base.py` (identifies as megamaid
-  with a URL — don't spoof a real browser unless the user says so).
+- Default User-Agent from `${CLAUDE_PLUGIN_ROOT}/src/megamaid/constants.py`
+  (identifies as megamaid with a URL — don't spoof a real browser unless the
+  user says so).
 
 ### 5. Dry-run on 3–5 items
 

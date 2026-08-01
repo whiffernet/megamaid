@@ -4,6 +4,21 @@ import re
 
 from conftest import find_bare_megamaid_invocations
 
+# Top-level directories of the plugin repo. A path in SKILL.md *prose* that
+# starts with one of these is a plugin-repo path, and must carry the
+# ${CLAUDE_PLUGIN_ROOT}/ prefix — see
+# test_prose_paths_into_the_plugin_repo_are_plugin_root_prefixed. Hardcoded
+# rather than globbed off disk so an untracked build artifact can't widen the
+# rule; test_the_repo_directory_list_is_not_stale keeps the list honest.
+PLUGIN_REPO_DIRS = ("src", "templates", "scripts", "skills", "tests", "commands", "assets")
+
+PLUGIN_ROOT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/"
+
+# Inline code spans, minus fenced blocks. Spans containing whitespace are shell
+# commands or markup, never a bare path reference.
+_CODE_SPAN = re.compile(r"`([^`\n]+)`")
+_FENCED = re.compile(r"```.*?```", re.DOTALL)
+
 REQUIRED_PATTERN_FILES = {
     "auth_wall.md",
     "graphql_api.md",
@@ -154,3 +169,145 @@ def test_skill_uses_the_launcher_not_a_bare_binary(repo_root):
 
 def test_skill_documents_the_launcher_invocation(repo_root):
     assert 'launch.py" --cli' in _skill(repo_root)
+
+
+def test_version_stamp_does_not_read_the_deleted_version_file(repo_root):
+    """The scaffold step used to say "write the contents of this skill's
+    `VERSION` file" — a file this branch deleted and test_manifests.py
+    guarantees stays deleted, so the skill's core workflow instructed an
+    operation the suite pins as impossible. plugin.json is the one version
+    source."""
+    text = _skill(repo_root)
+    assert "`VERSION`" not in text, "VERSION was deleted; read plugin.json's version field"
+    assert "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json" in text
+
+
+# ---------------------------------------------------------------------------
+# Prose path references
+#
+# The Directory Reference tree above is only half the surface. Two dead paths
+# (`templates/base.py`, which is `src/megamaid/base.py`) and two unresolvable
+# ones (bare `src/megamaid/`, `templates/` — repo-relative, so they resolve
+# against the *reader's* cwd, not the installed plugin) survived a passing
+# suite because nothing checked SKILL.md's prose. These guards close that,
+# following tests/test_readme.py's approach: extract candidates, exclude by a
+# documented rule, and refuse to pass vacuously.
+# ---------------------------------------------------------------------------
+
+
+def _prose_code_spans(text: str) -> list[str]:
+    """Inline code spans from SKILL.md prose, fenced blocks removed.
+
+    Spans containing whitespace are dropped: those are shell command lines
+    (``python -m venv .venv && source ...``) or HTML markup
+    (``<link rel="alternate" ...>``), not path references.
+
+    Args:
+        text: full SKILL.md contents.
+
+    Returns:
+        Candidate spans in first-seen order, deduplicated.
+    """
+    body = _FENCED.sub("", text)
+    found: list[str] = []
+    seen: set[str] = set()
+    for span in _CODE_SPAN.findall(body):
+        if not span or any(char.isspace() for char in span):
+            continue
+        if span in seen:
+            continue
+        seen.add(span)
+        found.append(span)
+    return found
+
+
+def test_the_repo_directory_list_is_not_stale(repo_root):
+    """PLUGIN_REPO_DIRS is hardcoded; a renamed directory must not silently
+    shrink what the prefix rule below covers."""
+    missing = [name for name in PLUGIN_REPO_DIRS if not (repo_root / name).is_dir()]
+    assert not missing, f"PLUGIN_REPO_DIRS names directories that no longer exist: {missing}"
+
+
+def test_plugin_root_prefixed_prose_paths_exist(repo_root):
+    """Every ${CLAUDE_PLUGIN_ROOT}/… path named in prose must be a real file.
+
+    This is the guard that would have caught `templates/base.py` once the path
+    carried the prefix that makes it resolvable at all.
+    """
+    candidates = [
+        remainder
+        for span in _prose_code_spans(_skill(repo_root))
+        if span.startswith(PLUGIN_ROOT_PREFIX)
+        # the bare prefix itself is the plugin root, nothing to resolve
+        if (remainder := span[len(PLUGIN_ROOT_PREFIX) :].rstrip("/"))
+    ]
+
+    assert len(candidates) >= 3, (
+        f"only found {len(candidates)} ${{CLAUDE_PLUGIN_ROOT}}-prefixed path(s) in SKILL.md "
+        "prose; the extraction may have stopped matching — this guard exists so a "
+        "broken regex can't silently check nothing"
+    )
+
+    missing = [path for path in candidates if not (repo_root / path).exists()]
+    assert not missing, (
+        "SKILL.md names ${CLAUDE_PLUGIN_ROOT}-relative path(s) that don't exist:\n"
+        + "\n".join(f"  - {p}" for p in missing)
+    )
+
+
+def test_prose_paths_into_the_plugin_repo_are_plugin_root_prefixed(repo_root):
+    """A bare repo-relative path in SKILL.md resolves against the reader's cwd.
+
+    Claude runs this skill from wherever the user happens to be, so `src/…`
+    or `templates/…` written bare points at nothing. Anything addressing the
+    plugin repo must say so explicitly.
+
+    Excluded, deliberately: spans starting with ``http`` (URLs), ``/`` (web
+    endpoints like ``/graphql`` and ``/collections/*/products.json``), ``.``
+    (``./staging/…``, ``.venv/…``, ``.megamaid-version``), and ``<``
+    (placeholders). None of those are plugin-repo paths. Names like
+    ``targets/`` and ``staging/`` are also untouched by this rule because they
+    describe the *scraped project's* layout, not this repo's — which is why the
+    rule keys on this repo's top-level directory names rather than on "looks
+    like a path".
+    """
+    offenders = []
+    for span in _prose_code_spans(_skill(repo_root)):
+        if span.startswith((PLUGIN_ROOT_PREFIX, "http", "/", ".", "<")):
+            continue
+        first = span.split("/", 1)[0]
+        if first in PLUGIN_REPO_DIRS and "/" in span:
+            offenders.append(span)
+
+    assert not offenders, (
+        "SKILL.md names plugin-repo path(s) without the "
+        "${CLAUDE_PLUGIN_ROOT}/ prefix, so they resolve against the reader's "
+        "working directory instead of the installed plugin:\n"
+        + "\n".join(f"  - {p}" for p in offenders)
+    )
+
+
+def test_skill_local_prose_paths_exist(repo_root):
+    """`patterns/…` and `references/…` are relative to the skill's own directory.
+
+    Unlike README.md (repo root), SKILL.md lives at skills/megamaid/, so its
+    own sibling references resolve there — the distinction that made the
+    plugin restructure rot paths in the first place.
+    """
+    skill_dir = repo_root / "skills" / "megamaid"
+    candidates = [
+        span
+        for span in _prose_code_spans(_skill(repo_root))
+        if span.startswith(("patterns/", "references/"))
+    ]
+
+    assert len(candidates) >= 3, (
+        f"only found {len(candidates)} skill-local path(s) in SKILL.md prose; "
+        "the extraction may have stopped matching"
+    )
+
+    missing = [path for path in candidates if not (skill_dir / path).exists()]
+    assert not missing, (
+        "SKILL.md names skill-relative path(s) that don't exist under "
+        f"{skill_dir}:\n" + "\n".join(f"  - {p}" for p in missing)
+    )

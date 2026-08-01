@@ -19,7 +19,7 @@ No databases. No vector stores. No phoning home. Just files.
 
 > _"Colonel Sandurz, we scanned the planet. It's all there."_
 
-1. **Recons the target** — run `megamaid recon <url>` to probe robots.txt, sitemaps, anti-bot systems, and API markers in 3–6 requests and get a recommended pattern with confidence level.
+1. **Recons the target** — `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli recon <url>` probes robots.txt, sitemaps, anti-bot systems, and API markers in 3–6 requests and returns a recommended pattern with a confidence level. (A plugin install puts nothing on PATH — see [Running megamaid commands](#running-megamaid-commands).)
 2. **Scaffolds a project** — copies a working Python project with `BaseScraper`, manifest tracking, delta detection, and a CLI (`megamaid recon / suck / status / diff / init`).
 3. **Writes the target class** — the only bespoke part: URL discovery and field extraction, tailored to the detected pattern.
 4. **Dry-runs** — scrapes 3–5 items so you can iterate on selectors before committing to a full run.

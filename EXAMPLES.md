@@ -16,13 +16,13 @@ Three examples — images, PDFs, and text — each showing what you say to Claud
 
 **What megamaid does:**
 
-Claude runs `megamaid recon https://www.walmart.com`, detects PerimeterX anti-bot and pulls `__NEXT_DATA__` SSR state from the page — Walmart bakes the full product payload into its server-rendered HTML, so no API reverse-engineering needed. megamaid uses stealth httpx headers (matching Walmart's expected `Sec-Fetch-*` profile + cookie warmup) to bypass PerimeterX, paginates through the Lego category, extracts the self-hosted image CDN URLs, and downloads the largest available resolution per unique image (resolution-aware dedup skips smaller variants of photos it's already seen).
+Claude recons `https://www.walmart.com` through the plugin launcher, detects PerimeterX anti-bot and pulls `__NEXT_DATA__` SSR state from the page — Walmart bakes the full product payload into its server-rendered HTML, so no API reverse-engineering needed. megamaid uses stealth httpx headers (matching Walmart's expected `Sec-Fetch-*` profile + cookie warmup) to bypass PerimeterX, paginates through the Lego category, extracts the self-hosted image CDN URLs, and downloads the largest available resolution per unique image (resolution-aware dedup skips smaller variants of photos it's already seen).
 
 The project scaffolds in `~/megamaid-walmart-lego/`:
 
-```
-megamaid suck          # scrapes everything
-megamaid suck --max 5  # dry-run: 5 products to verify selectors
+```bash
+.venv/bin/megamaid suck          # scrapes everything
+.venv/bin/megamaid suck --max 5  # dry-run: 5 products to verify selectors
 ```
 
 **What you get:**
@@ -50,13 +50,13 @@ On a second run, only new or changed listings download — unchanged items are s
 
 **What megamaid does:**
 
-Claude runs `megamaid recon https://www.fda.gov`, detects the openFDA REST API at `/api/drug/label.json`, and chooses the `pdf_downloads` pattern — searches the openFDA API for diabetes-related labels, collects PDF download URLs from the results, then streams each PDF and extracts the text with pypdf.
+Claude recons `https://www.fda.gov` through the plugin launcher, detects the openFDA REST API at `/api/drug/label.json`, and chooses the `pdf_downloads` pattern — searches the openFDA API for diabetes-related labels, collects PDF download URLs from the results, then streams each PDF and extracts the text with pypdf.
 
 No browser required. The entire run is httpx.
 
-```
-megamaid suck --max 5  # dry-run: 5 labels to verify extraction
-megamaid suck          # full archive
+```bash
+.venv/bin/megamaid suck --max 5  # dry-run: 5 labels to verify extraction
+.venv/bin/megamaid suck          # full archive
 ```
 
 **What you get:**
@@ -96,13 +96,13 @@ Each doc has **20,000–48,000 characters** of extracted text ready for search, 
 
 **What megamaid does:**
 
-Claude runs `megamaid recon https://news.ycombinator.com`, spots the RSS alternate link in the `<head>`, and chooses the `rss_atom_feed` pattern — fetches `https://hnrss.org/newest`, parses the RSS 2.0 feed, and writes each story as a `ScrapedDoc` with the URL, title, summary, and publication timestamp. The manifest's identity-hash delta detection means only stories that weren't in the last run are written on subsequent runs.
+Claude recons `https://news.ycombinator.com` through the plugin launcher, spots the RSS alternate link in the `<head>`, and chooses the `rss_atom_feed` pattern — fetches `https://hnrss.org/newest`, parses the RSS 2.0 feed, and writes each story as a `ScrapedDoc` with the URL, title, summary, and publication timestamp. The manifest's identity-hash delta detection means only stories that weren't in the last run are written on subsequent runs.
 
-```
-megamaid suck --max 5  # dry-run: 5 stories
+```bash
+.venv/bin/megamaid suck --max 5  # dry-run: 5 stories
 
 # Add to cron for daily updates:
-# 0 8 * * * cd ~/megamaid-hn && source .venv/bin/activate && megamaid suck
+# 0 8 * * * cd ~/megamaid-hn && .venv/bin/megamaid suck
 ```
 
 **What you get:**
@@ -137,7 +137,9 @@ Run it daily and you get a growing local archive of everything that surfaces on 
 >
 > — Dark Helmet, discovering how much faster things get when you stop opening Claude Code every time
 
-The MCP server (`megamaid-mcp`) exposes the same scraping power as a callable tool — no conversation required. These examples show what it looks like from a Claude agent, an automation workflow, and a direct API call.
+The MCP server (`megamaid-mcp`) exposes the same scraping power as a callable tool — no conversation required. These examples show what it looks like from a Claude agent, an automation workflow, and a plain Python script.
+
+The transport is **stdio only**. A client spawns `megamaid-mcp` as a subprocess and speaks JSON-RPC over its stdin/stdout; there is no listening port, no URL and no token to manage. That is deliberate — see the note in `src/megamaid_mcp/server.py`: the process boundary is the authentication.
 
 ### MCP Example 1: Agent sub-tool
 
@@ -189,13 +191,15 @@ for doc in result["new_docs"]:
 
 A scheduled workflow calls `megamaid_recon` weekly against a list of competitor sites. When a site changes its anti-bot system or opens a new sitemap, a Slack alert fires — no Claude session, no human needed.
 
+Because the server is stdio-only, the scheduler drives it by **running a command**, not by calling an endpoint: any "Execute Command" / shell node that runs the script in Example 3 below works, as does a bare cron line.
+
 **Workflow:**
 
 ```
 Schedule trigger (Monday 9am)
   ↓
-HTTP Request node
-  POST http://localhost:8305/mcp
+Execute Command node
+  megamaid-mcp                       ← spawned per call, stdio JSON-RPC
   tool: megamaid_recon
   url:  https://www.competitor.com
   ↓
@@ -219,50 +223,49 @@ Store last week's `recommended_pattern.pattern` in the workflow's static data. C
 
 ---
 
-### MCP Example 3: Direct API call (no Claude required)
+### MCP Example 3: Plain Python over stdio (no Claude required)
 
-Any script, cron job, or service that can make HTTP requests can call the MCP server directly. Here's a Python script that runs a project and writes a daily digest to a file — no LLM, no conversation.
+Any script, cron job, or service that can spawn a subprocess can drive the MCP server. Here's a Python script that runs a project and writes a daily digest to a file — no LLM, no conversation.
+
+Install the server and the client half:
+
+```bash
+pipx install "git+https://github.com/whiffernet/megamaid@v0.9.0#egg=megamaid[mcp]"
+pip install mcp
+```
 
 ```python
-import httpx, json
+import asyncio
+import json
 
-MCP_URL = "http://localhost:8305/mcp"
-TOKEN   = "your-bearer-token"
-HEADERS = {
-    "Content-Type": "application/json",
-    "Accept": "application/json, text/event-stream",
-    "Authorization": f"Bearer {TOKEN}",
-}
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
-def mcp(session_id, tool, args):
-    r = httpx.post(MCP_URL, headers={**HEADERS, "mcp-session-id": session_id},
-                   json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                         "params": {"name": tool, "arguments": args}}, timeout=300)
-    for line in r.text.splitlines():
-        if line.startswith("data:"):
-            d = json.loads(line[5:])
-            return json.loads(d["result"]["content"][0]["text"])
 
-# 1. Initialize session
-r = httpx.post(MCP_URL, headers=HEADERS, json={"jsonrpc":"2.0","id":0,
-    "method":"initialize","params":{"protocolVersion":"2024-11-05",
-    "capabilities":{},"clientInfo":{"name":"cron","version":"1.0"}}})
-sid = r.headers["mcp-session-id"]
+async def call(tool: str, args: dict) -> dict:
+    """Spawn megamaid-mcp, make one tool call over stdio, tear it down."""
+    async with stdio_client(StdioServerParameters(command="megamaid-mcp")) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool, args)
+            return json.loads(result.content[0].text)
 
-# 2. Run the scraper
-result = mcp(sid, "megamaid_run", {
-    "project": "megamaid-hnrss",
-    "include_docs": True,
-    "summary_only": True
-})
 
-# 3. Write digest
+# "project" takes an absolute path, or a bare name resolved under
+# MEGAMAID_PROJECTS_DIR (default: your home directory).
+result = asyncio.run(
+    call(
+        "megamaid_run",
+        {"project": "~/megamaid-hnrss", "include_docs": True, "summary_only": True},
+    )
+)
+
 with open("/tmp/hn-digest.md", "w") as f:
     f.write(f"# HN Digest — {result['run_id']}\n\n")
     for doc in result.get("new_docs", []):
         f.write(f"- [{doc['title']}]({doc['source_url']})\n")
 
-print(f"Wrote {len(result.get('new_docs',[]))} new stories")
+print(f"Wrote {len(result.get('new_docs', []))} new stories")
 ```
 
 Run this from cron. No LLM. No conversation. Just files.
