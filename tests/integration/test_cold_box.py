@@ -50,6 +50,16 @@ INITIALIZE = {
 # without it, so a handshake missing this notification is not a real one.
 INITIALIZED_NOTIFICATION = {"jsonrpc": "2.0", "method": "notifications/initialized"}
 TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+# megamaid_status needs no network and no scaffolded project — a lookup
+# against a name that does not exist under PROJECTS_DIR still exercises a
+# full tool call (and, critically, the mcp SDK's own request-dispatch log
+# line) without depending on any fixture state.
+CALL_STATUS_TOOL = {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {"name": "megamaid_status", "arguments": {"project": "does-not-exist"}},
+}
 
 EXPECTED_TOOLS = {"megamaid_recon", "megamaid_run", "megamaid_status", "megamaid_list_docs"}
 
@@ -63,7 +73,7 @@ def cold_state():
     shutil.rmtree(path, ignore_errors=True)
 
 
-def _handshake(repo_root, state, extra_args=()):
+def _handshake(repo_root, state, extra_args=(), extra_requests=()):
     """Run the launcher and drive a real MCP initialize + tools/list exchange.
 
     Claude Code holds the child's stdin open for the life of the session; it
@@ -75,6 +85,12 @@ def _handshake(repo_root, state, extra_args=()):
     completely healthy. So this drives the pipe the way a real client does:
     write the full handshake, wait for both JSON-RPC responses to actually
     appear, and only then close stdin.
+
+    Args:
+        extra_requests: additional JSON-RPC requests (each with a unique
+            "id") sent after tools/list, in order. The handshake waits for a
+            response to every one of them before closing stdin, exactly as
+            it already does for initialize and tools/list.
     """
     env = {**os.environ, "MEGAMAID_STATE_DIR": str(state)}
     started = time.monotonic()
@@ -97,12 +113,14 @@ def _handshake(repo_root, state, extra_args=()):
 
     threading.Thread(target=_pump_stdout, daemon=True).start()
 
+    requests = [TOOLS_LIST, *extra_requests]
     proc.stdin.write(json.dumps(INITIALIZE) + "\n")
     proc.stdin.write(json.dumps(INITIALIZED_NOTIFICATION) + "\n")
-    proc.stdin.write(json.dumps(TOOLS_LIST) + "\n")
+    for request in requests:
+        proc.stdin.write(json.dumps(request) + "\n")
     proc.stdin.flush()
 
-    expected_ids = {INITIALIZE["id"], TOOLS_LIST["id"]}
+    expected_ids = {INITIALIZE["id"], *(request["id"] for request in requests)}
     seen_ids = set()
     deadline = time.monotonic() + RECEIVE_TIMEOUT_SECONDS
     while time.monotonic() < deadline and seen_ids != expected_ids:
@@ -196,3 +214,45 @@ def test_the_timing_gate_rejects_an_over_budget_start():
 
     with pytest.raises(AssertionError):
         assert_within_budget(31.0)  # past the real platform ceiling
+
+
+def _is_protocol_frame(line: str) -> bool:
+    """True when a stdout line is legitimate MCP wire traffic.
+
+    A stdio MCP server's stdout IS the transport: Claude Code reads it as
+    newline-delimited JSON-RPC messages (or, on transports that use it,
+    SSE-style `data:`/`event:`/`id:` framing) and nothing else. Anything that
+    isn't one of those shapes is corruption — in practice, a library's
+    plain-text log line that rode along on the same file descriptor.
+    """
+    if not line.strip():
+        return True  # blank lines carry no data; not corruption
+    if line.startswith(("data:", "event:", "id:")):
+        return True
+    try:
+        json.loads(line)
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
+def test_stdout_carries_only_protocol_frames_during_a_tool_call(repo_root, cold_state):
+    """A stdio MCP server's stdout is the wire, not a log.
+
+    This test exists because a library log line was once found there:
+    `logging.basicConfig(..., stream=sys.stdout)` in megamaid_mcp/server.py
+    configured the ROOT logger, and Python loggers propagate to root by
+    default — so a *third-party* dependency's own `logger.info(...)` call
+    (the mcp SDK's request dispatcher logs "Processing request of type
+    CallToolRequest" for every tool call) rode along on the same fd Claude
+    Code parses as JSON-RPC. Under the retired HTTP transport that would
+    have been harmless; on stdio-only it silently corrupts the session the
+    moment anything logs. A tool call is required (not just tools/list) to
+    reach the dispatch path where that log line was actually observed.
+    """
+    proc, _ = _handshake(repo_root, cold_state, extra_requests=[CALL_STATUS_TOOL])
+    lines = proc.stdout.splitlines()
+    offending = [line for line in lines if not _is_protocol_frame(line)]
+    assert not offending, "non-protocol data on stdout (the MCP wire):\n" + "\n".join(
+        repr(line) for line in offending
+    )

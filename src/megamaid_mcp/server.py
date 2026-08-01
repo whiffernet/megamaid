@@ -41,7 +41,16 @@ from megamaid.recon import run_recon
 PROJECTS_DIR = Path(os.environ.get("MEGAMAID_PROJECTS_DIR_INTERNAL", "/projects"))
 TIMEOUT = float(os.environ.get("MEGAMAID_TIMEOUT", "300"))
 
-logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
+# stderr, not stdout, is mandatory here. stdout is the JSON-RPC wire for a
+# stdio MCP server (Claude Code reads framed protocol messages from it), and
+# basicConfig() configures the ROOT logger — every third-party library's own
+# logger.info/warning/etc (fastmcp, mcp, anyio, ...) propagates to root by
+# default and would inherit this handler too. Routing that to stdout was
+# found to interleave library log lines (e.g. the mcp SDK's own
+# "Processing request of type ..." line, emitted mid-tool-call) into the
+# protocol stream, corrupting the framing a real client parses. Do not
+# switch this back to stdout.
+logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
 
