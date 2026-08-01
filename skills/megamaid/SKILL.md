@@ -234,7 +234,10 @@ These are not suggestions.
 5. **No proxy rotation, no IP spoofing, no fingerprint evasion** baked
    into the scaffold. Stealth plugins are mentioned in
    `references/troubleshooting.md` as an opt-in the user wires up
-   themselves.
+   themselves. **The scaffold identifies itself.** Every request the
+   scaffold makes on your behalf carries `DEFAULT_USER_AGENT`, which
+   names megamaid and links this repo. A target that blocks an honest
+   User-Agent is telling you it does not want to be scraped.
 
 ## Directory Reference
 

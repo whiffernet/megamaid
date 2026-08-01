@@ -82,3 +82,16 @@ def test_sitemap_discovery_sends_the_honest_user_agent(monkeypatch):
         f"sitemap_discovery sent {seen['user_agent']!r}, expected the honest {DEFAULT_USER_AGENT!r}"
     )
     assert "megamaid/" in seen["user_agent"]
+
+
+def test_policy_states_the_positive_requirement(repo_root):
+    """The non-negotiable must say what the scaffold DOES, not only what it must not.
+
+    Phrased purely as prohibition, a spoofed default violated no stated rule.
+    """
+    skill = (repo_root / "skills" / "megamaid" / "SKILL.md").read_text()
+    assert "The scaffold identifies itself." in skill, (
+        "non-negotiable #5 states only prohibitions; it needs a positive "
+        "requirement that the scaffold identify itself"
+    )
+    assert "DEFAULT_USER_AGENT" in skill
