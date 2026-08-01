@@ -2,6 +2,8 @@
 
 import re
 
+from conftest import find_bare_megamaid_invocations
+
 REQUIRED_PATTERN_FILES = {
     "auth_wall.md",
     "graphql_api.md",
@@ -137,3 +139,18 @@ def test_directory_reference_block_documents_real_layout(repo_root):
         f"Directory reference tree names {len(missing)} missing path(s):\n"
         + "\n".join(f"  - {p}" for p in missing)
     )
+
+
+def test_skill_uses_the_launcher_not_a_bare_binary(repo_root):
+    """After a plugin install nothing named `megamaid` is on PATH.
+
+    `find_bare_megamaid_invocations` is the shared detector used across the
+    test suite (see tests/conftest.py and tests/test_plugin_wiring.py) — the
+    skill must not introduce a second, divergent notion of "bare invocation".
+    """
+    offenders = find_bare_megamaid_invocations(_skill(repo_root))
+    assert not offenders, f"bare megamaid invocations in SKILL.md: {offenders}"
+
+
+def test_skill_documents_the_launcher_invocation(repo_root):
+    assert 'launch.py" --cli' in _skill(repo_root)

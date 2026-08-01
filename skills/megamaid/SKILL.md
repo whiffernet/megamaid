@@ -41,6 +41,25 @@ Do **not** invoke for:
 
 Follow these steps in order. Don't skip recon.
 
+### Running megamaid commands
+
+`claude plugin install` registers plugin components; it puts nothing on your
+PATH. Every megamaid command therefore runs through the launcher, which
+builds and maintains its own environment:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli <command> [args…]
+```
+
+Below, `mm` is shorthand for that whole invocation. It covers the
+URL-scoped commands (`recon`, `map`, `init`), which need no project and no
+browser and run from the launcher's own state venv.
+
+The project-scoped commands (`suck`, `status`, `diff`, `export`) read
+`staging/` relative to the working directory, and `suck` imports the
+scraped project's own `targets/` package — they can only run from inside
+that project, never from the launcher's state venv.
+
 ### 1. Gather inputs
 
 Ask the user:
@@ -63,14 +82,14 @@ stop. Don't guess.
 
 > _"Colonel Sandurz, we scanned the planet. It's all there."_
 
-Before writing a line of parser code, survey the target. If the project
-is already scaffolded, run `megamaid recon <url>` to automate this step —
-it probes robots.txt, sitemaps, anti-bot, structured data, and API
-endpoints in 3-6 requests and recommends a pattern with a confidence
-level. If confidence is **high**, proceed with the recommended pattern.
-If **medium** or **low**, do manual recon per the instructions below.
+Before writing a line of parser code, survey the target. Run
+`mm recon <url>` to automate this step — it probes robots.txt, sitemaps,
+anti-bot, structured data, and API endpoints in 3-6 requests and
+recommends a pattern with a confidence level. If confidence is **high**,
+proceed with the recommended pattern. If **medium** or **low**, do manual
+recon per the instructions below.
 
-Manual recon steps (or if `megamaid recon` is not available):
+Manual recon steps (or if recon is inconclusive):
 
 1. `WebFetch` on `https://<domain>/robots.txt`. Note `Disallow` entries
    and any `Crawl-delay`. If `Disallow: /` covers your target path and
@@ -151,10 +170,13 @@ Defaults:
 
 > _"Ludicrous speed? No, no, no — regular speed. We're dry-running."_
 
+The commands below run inside the scraped project's directory, where
+`.venv/` and `targets/` live.
+
 Before a full run:
 
 ```bash
-megamaid suck --max 5
+.venv/bin/megamaid suck --max 5
 ```
 
 Show the user the JSON from `staging/<slug>/<run_id>/docs/*.json` and
@@ -164,20 +186,20 @@ right. It is faster to fix a selector now than debug 10,000 bad rows.
 ### 6. Full run
 
 ```bash
-megamaid suck
+.venv/bin/megamaid suck
 ```
 
 The manifest is written incrementally. If the run crashes, re-run the
 same command — completed items are skipped via identity hash. Use
-`megamaid status` to see run state and `megamaid diff` to see what
-changed since last run.
+`.venv/bin/megamaid status` to see run state and `.venv/bin/megamaid diff`
+to see what changed since last run.
 
 ### 7. Export (optional)
 
 ```bash
-megamaid export --format csv     # CSV with flattened metadata
-megamaid export --format jsonl   # one JSON doc per line
-megamaid export --format json    # consolidated JSON array
+.venv/bin/megamaid export --format csv     # CSV with flattened metadata
+.venv/bin/megamaid export --format jsonl   # one JSON doc per line
+.venv/bin/megamaid export --format json    # consolidated JSON array
 ```
 
 Reads from the latest completed run. No re-scraping.
