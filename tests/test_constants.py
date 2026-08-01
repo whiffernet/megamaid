@@ -12,12 +12,10 @@ import sys
 
 
 def _module_path(repo_root, name):
-    """Locate a runtime module whether or not the src/ move has happened yet."""
-    for base in ("src/megamaid", "templates/megamaid"):
-        candidate = repo_root / base / name
-        if candidate.exists():
-            return candidate
-    raise AssertionError(f"could not find {name} under src/megamaid or templates/megamaid")
+    """Locate a runtime module."""
+    candidate = repo_root / "src" / "megamaid" / name
+    assert candidate.exists(), f"missing runtime module {candidate}"
+    return candidate
 
 
 def _imported_modules(path: pathlib.Path) -> set[str]:
