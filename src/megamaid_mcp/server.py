@@ -7,11 +7,12 @@ Exposes four tools:
   megamaid_list_docs  — list scraped docs from a run (disk read, no network)
 
 Projects are read from MEGAMAID_PROJECTS_DIR_INTERNAL (default /projects).
-Pass either a bare name ("megamaid-walmart") or an absolute container path
-("/projects/megamaid-walmart") to any tool that takes a project argument.
+Pass either a bare name ("megamaid-walmart") or an absolute path.
 
-Self-contained: no dependency on the mcp/shared/ utilities in the parent
-mcp repo. Auth and logging are inlined below.
+Transport is stdio ONLY, and that is load-bearing. FastMCP binds auth at
+construction, so a network listener here would be unauthenticated on every
+interface while megamaid_run subprocesses a project venv python. The process
+boundary is the authentication. tests/test_server_transport.py enforces it.
 """
 
 import json
@@ -28,10 +29,10 @@ from typing import Annotated
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
+from pydantic import Field
+
 from megamaid.manifest import Manifest
 from megamaid.recon import run_recon
-from pydantic import Field
 
 # ---------------------------------------------------------------------------
 # Config
@@ -45,40 +46,10 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Auth (inlined — no dependency on mcp/shared/)
-# ---------------------------------------------------------------------------
-
-
-def _load_secret(name: str, env_var: str | None = None) -> str:
-    """Load a secret from Docker secrets, env var, or local .secrets/ file."""
-    secret_path = Path(f"/run/secrets/{name}")
-    if secret_path.exists():
-        return secret_path.read_text().strip()
-    if env_var:
-        value = os.environ.get(env_var)
-        if value:
-            return value
-    local_path = Path(__file__).parent / ".secrets" / name
-    if local_path.exists():
-        return local_path.read_text().strip()
-    raise FileNotFoundError(
-        f"Secret '{name}' not found. Checked {secret_path}, env:{env_var or 'N/A'}, {local_path}"
-    )
-
-
-def _create_auth() -> StaticTokenVerifier:
-    token = _load_secret("mcp_bearer_token", env_var="MCP_BEARER_TOKEN")
-    return StaticTokenVerifier(
-        tokens={token: {"client_id": "mcp-client", "scopes": ["full"]}},
-        required_scopes=["full"],
-    )
-
-
-# ---------------------------------------------------------------------------
 # Server init
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP(name="megamaid", auth=_create_auth())
+mcp = FastMCP(name="megamaid")
 
 
 # ---------------------------------------------------------------------------
@@ -484,5 +455,10 @@ async def megamaid_list_docs(
     }
 
 
+def main() -> None:
+    """Console-script entry point. stdio only — see the module docstring."""
+    mcp.run()
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
+    main()
