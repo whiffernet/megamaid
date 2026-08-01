@@ -52,8 +52,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli <command> [args…]
 ```
 
 Below, `mm` is shorthand for that whole invocation. It covers the
-URL-scoped commands (`recon`, `map`, `init`), which need no project and no
-browser and run from the launcher's own state venv.
+URL-scoped commands (`recon`, `map`, `init`), which need no project and run
+from the launcher's own state venv.
+
+That venv has no browser, and that matters for exactly one thing: `mm map`
+has an optional link-crawl layer that does. Without a browser it returns the
+URLs it found via sitemap — complete, valid output — and says on stderr that
+it skipped the crawl. If you need the crawl, run `map` from a scraped
+project's `.venv/bin/megamaid`, which has the browser.
 
 The project-scoped commands (`suck`, `status`, `diff`, `export`) read
 `staging/` relative to the working directory, and `suck` imports the

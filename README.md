@@ -136,6 +136,11 @@ launcher:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli recon https://example.com
 ```
 
+The launcher's venv installs no browser, which affects one thing: `map`'s
+optional link-crawl layer. Run from the launcher, `map` returns the URLs it found
+via sitemap and tells you on stderr that it skipped the crawl. Run it from a
+scraped project's `.venv/bin/megamaid` if you want the crawl too.
+
 **Project-scoped** (`suck`, `status`, `diff`, `export`) — run inside a scraped project
 directory, where `targets/` and `.venv/` live:
 

@@ -472,7 +472,15 @@ def map(url: str, max_urls: int, url_filter: str | None, output_file: Path | Non
     if sitemap_count:
         logger.info(f"Sitemap: found {sitemap_count} URLs")
 
-    # Layer 2: If sitemap yielded few/no results, crawl links
+    # Layer 2: If the sitemap yielded fewer than --max URLs, crawl links.
+    #
+    # This layer is OPTIONAL, and the whole command is documented as
+    # browser-free. It fires whenever the sitemap came up short of --max
+    # (default 500), which is the common case, and it needs playwright — which
+    # the launcher's [mcp,cli] state venv deliberately does not install. So a
+    # missing browser degrades `map` to its sitemap results, which are
+    # complete, valid output on their own, instead of ending the command in a
+    # traceback after the work is already done.
     if len(urls) < max_urls:
         logger.info("Crawling links from start URL...")
 
@@ -509,8 +517,20 @@ def map(url: str, max_urls: int, url_filter: str | None, output_file: Path | Non
             await browser.close()
             await pw.stop()
 
-        asyncio.run(_crawl_links())
-        logger.info(f"Link crawl: found {len(urls) - sitemap_count} additional URLs")
+        try:
+            asyncio.run(_crawl_links())
+        except ImportError as exc:
+            click.echo(
+                f"Link crawl skipped: it needs a browser and playwright is not "
+                f"available here ({exc}).\n"
+                f"The {sitemap_count} URL(s) found via sitemap are still complete, "
+                f"valid output.\n"
+                f"To crawl links too, run map from a project venv that has the "
+                f"scraper extra: pip install -e '.[scraper]' && playwright install chromium",
+                err=True,
+            )
+        else:
+            logger.info(f"Link crawl: found {len(urls) - sitemap_count} additional URLs")
 
     # Filter
     if url_filter:
