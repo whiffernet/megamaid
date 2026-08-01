@@ -206,6 +206,9 @@ These are not suggestions.
 
 ```
 megamaid/                            # the plugin repo
+├── .claude-plugin/
+│   ├── plugin.json                  # plugin manifest
+│   └── marketplace.json             # marketplace listing
 ├── skills/megamaid/
 │   ├── SKILL.md                     # you are here
 │   ├── patterns/                    # target-shape playbooks (12)
@@ -214,8 +217,12 @@ megamaid/                            # the plugin repo
 ├── src/megamaid_mcp/                # MCP server (stdio)
 ├── templates/                       # scaffolded-project stub
 │   ├── pyproject.toml
-│   └── targets/example_target.py
-└── scripts/launch.py                # venv bootstrap for MCP and CLI
+│   ├── README.md
+│   └── targets/
+│       └── example_target.py
+├── tests/                           # test suite
+├── pyproject.toml                   # plugin project manifest
+└── README.md                        # plugin documentation
 ```
 
 May the Schwartz be with your selectors.
