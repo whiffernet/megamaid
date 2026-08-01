@@ -16,7 +16,7 @@ Three examples — images, PDFs, and text — each showing what you say to Claud
 
 **What megamaid does:**
 
-Claude recons `https://www.walmart.com` through the plugin launcher, detects PerimeterX anti-bot and pulls `__NEXT_DATA__` SSR state from the page — Walmart bakes the full product payload into its server-rendered HTML, so no API reverse-engineering needed. megamaid uses stealth httpx headers (matching Walmart's expected `Sec-Fetch-*` profile + cookie warmup) to bypass PerimeterX, paginates through the Lego category, extracts the self-hosted image CDN URLs, and downloads the largest available resolution per unique image (resolution-aware dedup skips smaller variants of photos it's already seen).
+Claude recons `https://www.walmart.com` through the plugin launcher, detects PerimeterX anti-bot and pulls `__NEXT_DATA__` SSR state from the page — Walmart bakes the full product payload into its server-rendered HTML, so no API reverse-engineering needed. Requests go out under the megamaid User-Agent as it paginates through the Lego category, extracts the self-hosted image CDN URLs, and downloads the largest available resolution per unique image (resolution-aware dedup skips smaller variants of photos it's already seen).
 
 The project scaffolds in `~/megamaid-walmart-lego/`:
 
