@@ -3,6 +3,7 @@ stdlib-only and every subprocess call is injected."""
 
 import ast
 import importlib.util
+import subprocess
 
 import pytest
 
@@ -32,6 +33,17 @@ def _load(repo_root):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _stub_entry_points(venv_dir):
+    """Create fake, executable console scripts so a runner's "pip install"
+    looks like it actually produced a usable venv."""
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("megamaid-mcp", "megamaid"):
+        script = bin_dir / name
+        script.write_text("#!/bin/sh\n")
+        script.chmod(0o755)
 
 
 def test_launcher_imports_only_stdlib(repo_root):
@@ -113,8 +125,61 @@ def test_log_is_written_before_slow_work(repo_root, tmp_path, monkeypatch):
 
     def runner(cmd, **kwargs):
         seen["log_at_call_time"] = (tmp_path / "launch.log").read_text()
-        (venv / "bin").mkdir(parents=True, exist_ok=True)
+        _stub_entry_points(venv)
         return None
 
     mod.ensure_venv(repo_root, venv, "0.9.0", runner=runner, log=mod._log)
     assert "build start" in seen["log_at_call_time"]
+
+
+def test_ensure_venv_captures_pip_stdout_so_it_cannot_corrupt_mcp_framing(repo_root, tmp_path):
+    """pip must not inherit fd 1: os.execv later hands that fd to the MCP server
+    for JSON-RPC framing, and any pip resolver/build chatter on it would corrupt
+    the handshake."""
+    mod = _load(repo_root)
+    venv = tmp_path / "venv"
+    seen = {}
+
+    def runner(cmd, **kwargs):
+        seen["kwargs"] = kwargs
+        _stub_entry_points(venv)
+        return None
+
+    mod.ensure_venv(repo_root, venv, "0.9.0", runner=runner, log=lambda m: None)
+    assert seen["kwargs"]["stdout"] == subprocess.PIPE
+    assert seen["kwargs"]["stderr"] == subprocess.STDOUT
+    assert seen["kwargs"]["text"] is True
+
+
+def test_ensure_venv_wraps_a_real_called_process_error_as_mm13(repo_root, tmp_path):
+    """The except-Exception branch must actually be reachable, not just the
+    LaunchError passthrough — exercise it with a realistic pip failure."""
+    mod = _load(repo_root)
+    venv = tmp_path / "venv"
+
+    def failing_runner(cmd, **kwargs):
+        raise subprocess.CalledProcessError(
+            1, cmd, output="ERROR: Could not find a version that satisfies the requirement\n"
+        )
+
+    with pytest.raises(mod.LaunchError) as excinfo:
+        mod.ensure_venv(repo_root, venv, "0.9.0", runner=failing_runner, log=lambda m: None)
+    assert excinfo.value.code == "MM-13"
+    assert "launch.log" in excinfo.value.fix
+    assert not (venv / ".plugin-version").exists()
+
+
+def test_ensure_venv_requires_entry_points_before_stamping(repo_root, tmp_path):
+    """A pip that exits 0 without producing the console scripts must not be
+    trusted — the venv should stay un-stamped so the next launch retries."""
+    mod = _load(repo_root)
+    venv = tmp_path / "venv"
+
+    def runner(cmd, **kwargs):
+        # "Successful" pip that does not actually produce console scripts.
+        return None
+
+    with pytest.raises(mod.LaunchError) as excinfo:
+        mod.ensure_venv(repo_root, venv, "0.9.0", runner=runner, log=lambda m: None)
+    assert excinfo.value.code == "MM-16"
+    assert not (venv / ".plugin-version").exists()
