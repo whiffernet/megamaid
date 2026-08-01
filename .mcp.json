@@ -1,0 +1,6 @@
+{
+  "megamaid": {
+    "command": "python3",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/launch.py"]
+  }
+}

@@ -135,7 +135,7 @@ def _require_entry_points(venv_path: pathlib.Path) -> None:
                 "MM-16",
                 f"pip reported success but {script} is missing or not "
                 f"executable (venv={venv_path}).",
-                f"Delete {state_dir()} and retry — the venv will rebuild on next launch.",
+                f"Delete {state_dir() / 'venv'} and retry — it will rebuild on next launch.",
             )
 
 
@@ -239,7 +239,7 @@ def main(argv: list[str] | None = None) -> None:
             raise LaunchError(
                 "MM-16",
                 f"{target} is missing or not executable.",
-                f"Delete {state_dir()} and retry — the venv will rebuild on next launch.",
+                f"Delete {state_dir() / 'venv'} and retry — it will rebuild on next launch.",
             )
     except LaunchError as err:
         _log(f"FAILED [{err.code}] {err.message}")
