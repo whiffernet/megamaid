@@ -17,3 +17,7 @@ staging/
 # Secrets
 .env
 .secrets/
+
+# Claude Code worktrees and agent scratch (must never be committed)
+.claude/worktrees/
+.superpowers/
