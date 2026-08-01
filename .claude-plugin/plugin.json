@@ -1,0 +1,12 @@
+{
+  "name": "megamaid",
+  "version": "0.9.0",
+  "description": "Scaffold polite, resumable web scrapers with Playwright. Recon a target, pick a pattern, generate a self-contained Python project that writes local documents with rate limiting, retries, and crash-resumable manifest tracking.",
+  "author": {
+    "name": "Erik Whiffer"
+  },
+  "homepage": "https://github.com/whiffernet/megamaid",
+  "repository": "https://github.com/whiffernet/megamaid",
+  "license": "MIT",
+  "keywords": ["scraping", "playwright", "crawler", "archiving", "mcp"]
+}
