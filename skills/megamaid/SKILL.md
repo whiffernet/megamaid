@@ -117,8 +117,8 @@ Read `references/recon.md` if the target doesn't fit cleanly.
 
 ### 3. Scaffold the project
 
-Copy `templates/` into the user's working directory (or a subdirectory
-named after the target). After copying:
+Copy the runtime from `src/megamaid/` and the project stub from `templates/`
+into the user's working directory (or a subdirectory named after the target). After copying:
 
 1. Rename `targets/example_target.py` to `targets/<slug>.py`.
 2. Edit `pyproject.toml` — set `name` and the console script entry.
@@ -205,35 +205,17 @@ These are not suggestions.
 ## Directory Reference
 
 ```
-megamaid/
-├── SKILL.md                         # you are here
-├── templates/                       # copied into user's project
-│   ├── base.py                      # BaseScraper (rate limit, retry, screenshots)
-│   ├── manifest.py                  # run/item/stats + delta detection
-│   ├── cli.py                       # megamaid CLI (suck/status/diff/init)
-│   ├── models.py                    # ScrapedDoc + ImageRef pydantic models
-│   ├── images.py                    # image discovery, download, scroll helpers
-│   ├── pyproject.toml               # project stub
-│   ├── README.md                    # per-project user docs
-│   └── targets/
-│       └── example_target.py        # subclass scaffold
-├── patterns/                        # target-shape playbooks
-│   ├── shopify_json.md
-│   ├── paginated_html.md
-│   ├── load_more_infinite.md
-│   ├── sitemap_crawl.md
-│   ├── pdf_downloads.md
-│   ├── spa_hydration.md
-│   ├── auth_wall.md
-│   ├── image_downloads.md
-│   ├── rest_json_api.md
-│   ├── graphql_api.md
-│   ├── rss_atom_feed.md
-│   └── search_seed.md
-└── references/
-    ├── recon.md                     # surveying an unknown target
-    ├── etiquette.md                 # robots.txt, rate limits, ToS
-    └── troubleshooting.md           # selector drift, timeouts, blocks
+megamaid/                            # the plugin repo
+├── skills/megamaid/
+│   ├── SKILL.md                     # you are here
+│   ├── patterns/                    # target-shape playbooks (12)
+│   └── references/                  # recon, etiquette, troubleshooting
+├── src/megamaid/                    # runtime, vendored into each project
+├── src/megamaid_mcp/                # MCP server (stdio)
+├── templates/                       # scaffolded-project stub
+│   ├── pyproject.toml
+│   └── targets/example_target.py
+└── scripts/launch.py                # venv bootstrap for MCP and CLI
 ```
 
 May the Schwartz be with your selectors.
