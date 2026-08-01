@@ -10,11 +10,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import httpx
-from playwright.async_api import Page
 
 from .constants import DEFAULT_USER_AGENT
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
 
