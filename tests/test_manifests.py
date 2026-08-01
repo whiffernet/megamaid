@@ -24,3 +24,12 @@ def test_marketplace_lists_this_plugin_from_repo_root(repo_root):
 def test_version_file_is_gone(repo_root):
     """VERSION was a third, always-stale version source. plugin.json is authoritative."""
     assert not (repo_root / "VERSION").exists()
+
+
+def test_version_txt_mirrors_plugin_json(repo_root):
+    """setuptools cannot read a JSON key, so the version is mirrored. Keep them equal."""
+    manifest = json.loads((repo_root / ".claude-plugin" / "plugin.json").read_text())
+    mirror = (repo_root / ".claude-plugin" / "VERSION.txt").read_text().strip()
+    assert mirror == manifest["version"], (
+        f"VERSION.txt ({mirror}) disagrees with plugin.json ({manifest['version']})"
+    )
