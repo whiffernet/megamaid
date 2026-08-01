@@ -91,7 +91,7 @@ from megamaid.images import ImageCandidate, download_images
 candidates = [
     ImageCandidate(url=img["src"], alt_text=img.get("alt", "")) for img in product.get("images", [])
 ]
-doc.images = await download_images(candidates, self._images_dir)
+doc.images = await download_images(candidates, self._images_dir, user_agent=self.user_agent)
 ```
 
 This is more reliable than scraping the rendered page — no lazy loading
