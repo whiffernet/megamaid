@@ -216,24 +216,53 @@ def test_the_timing_gate_rejects_an_over_budget_start():
         assert_within_budget(31.0)  # past the real platform ceiling
 
 
+def _is_json_rpc_envelope(text: str) -> bool:
+    """True when `text` is a JSON-RPC 2.0 request, response, or notification.
+
+    Deliberately stricter than "parses as JSON": it must be an object,
+    carry `"jsonrpc": "2.0"`, and carry at least one of id/method/result/
+    error. Plain "valid JSON" is not a strong enough test here — see
+    `_is_protocol_frame`'s docstring for why that distinction matters.
+    """
+    try:
+        message = json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(message, dict):
+        return False
+    if message.get("jsonrpc") != "2.0":
+        return False
+    return any(key in message for key in ("id", "method", "result", "error"))
+
+
 def _is_protocol_frame(line: str) -> bool:
     """True when a stdout line is legitimate MCP wire traffic.
 
     A stdio MCP server's stdout IS the transport: Claude Code reads it as
-    newline-delimited JSON-RPC messages (or, on transports that use it,
-    SSE-style `data:`/`event:`/`id:` framing) and nothing else. Anything that
-    isn't one of those shapes is corruption — in practice, a library's
-    plain-text log line that rode along on the same file descriptor.
+    newline-delimited JSON-RPC envelopes (or, on transports that use it,
+    SSE-style `data:`/`event:`/`id:` framing carrying the same envelopes)
+    and nothing else.
+
+    "Parses as JSON" is not a strong enough test: megamaid's own tool
+    handlers log via `logger.info(json.dumps({...}))` (see megamaid_recon
+    and megamaid_run in megamaid_mcp/server.py). A JSON *log line* parses
+    cleanly too, so a bare `json.loads` check would wave through exactly
+    the class of stdout corruption this test exists to catch — it would
+    just never have caught anything but a bare-text log line, and gone
+    blind the moment a regression routed one of those JSON-shaped log
+    calls to stdout instead. So this checks the JSON-RPC envelope shape
+    specifically (`_is_json_rpc_envelope`), not mere JSON-ness. A `data:`
+    line's payload is held to the same envelope rule; `event:`/`id:` are
+    SSE structural fields, not envelopes themselves, so their prefix alone
+    is accepted.
     """
     if not line.strip():
         return True  # blank lines carry no data; not corruption
-    if line.startswith(("data:", "event:", "id:")):
+    if line.startswith("data:"):
+        return _is_json_rpc_envelope(line[len("data:") :].strip())
+    if line.startswith(("event:", "id:")):
         return True
-    try:
-        json.loads(line)
-    except json.JSONDecodeError:
-        return False
-    return True
+    return _is_json_rpc_envelope(line)
 
 
 def test_stdout_carries_only_protocol_frames_during_a_tool_call(repo_root, cold_state):
