@@ -1,0 +1,1 @@
+"""megamaid MCP server package."""

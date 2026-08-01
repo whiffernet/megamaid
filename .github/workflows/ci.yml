@@ -4,8 +4,7 @@ on:
   push:
     branches: [main]
 
-# Lighter CI for a public skill/template/MCP repo (no test suite).
-# Jobs: lint, format, secret-scan, codeql, typecheck.
+# Jobs: lint, format, secret-scan, codeql, typecheck, test, plugin-validate, cold-box.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -41,4 +40,35 @@ jobs:
       - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - run: pip install playwright httpx pydantic click fastmcp mypy
-      - run: mypy mcp/ templates/ --ignore-missing-imports
+      - run: mypy src/ templates/ scripts/ --ignore-missing-imports
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[mcp,cli,dev]"
+      - run: python -m pytest tests/ -v --ignore=tests/integration
+
+  plugin-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate plugin and marketplace manifests
+        run: claude plugin validate . --strict
+      - name: Assert plugin.json and the marketplace entry agree on version
+        run: claude plugin tag --dry-run
+
+  cold-box:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - run: pip install pytest
+      - name: Cold-box MCP bootstrap (nothing preseeded)
+        env: { MEGAMAID_COLD_BOX: "1" }
+        run: python -m pytest tests/integration/ -v

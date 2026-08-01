@@ -12,14 +12,18 @@ updates:
       - '*'
   cooldown:
     default-days: 7
-- package-ecosystem: docker
-  directory: /mcp
+# The launcher pip-installs this package's [mcp,cli] extras at runtime with no
+# lockfile, so the declared ranges in pyproject.toml are the only thing keeping
+# that install current. Dependabot covering them is what the spec leans on when
+# it accepts an unpinned runtime install.
+- package-ecosystem: pip
+  directory: /
   schedule:
     interval: weekly
   labels:
   - dependencies
   groups:
-    docker-minor-patch:
+    python-minor-patch:
       patterns:
       - '*'
       update-types:

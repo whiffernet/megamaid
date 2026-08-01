@@ -1,0 +1,15 @@
+{
+  "name": "whiffernet",
+  "description": "Erik Whiffer's Claude Code plugins.",
+  "owner": {
+    "name": "Erik Whiffer"
+  },
+  "plugins": [
+    {
+      "name": "megamaid",
+      "source": "./",
+      "description": "Polite, resumable web scraper scaffolding for Claude Code.",
+      "category": "productivity"
+    }
+  ]
+}
