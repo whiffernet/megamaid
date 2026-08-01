@@ -7,6 +7,8 @@ blows Claude Code's 30-second connect budget.
 
 import ast
 import pathlib
+import subprocess
+import sys
 
 
 def _module_path(repo_root, name):
@@ -48,3 +50,41 @@ def test_default_user_agent_is_defined_once(repo_root):
     base = _module_path(repo_root, "base.py").read_text()
     assert "DEFAULT_USER_AGENT = (" not in base, "base.py must import the constant, not define it"
     assert "from .constants import DEFAULT_USER_AGENT" in base
+
+
+def test_recon_runtime_no_playwright(repo_root):
+    """Verify that importing megamaid.recon does not load playwright into sys.modules.
+
+    This test runs in a fresh subprocess because the pytest process may already have
+    playwright loaded by other tests. A subprocess ensures we measure whether recon
+    truly avoids the dependency, not whether pytest happens to have it cached.
+    The invariant this protects is stronger than any source-code check: nothing
+    reachable from megamaid.recon's import graph may import playwright.
+    """
+    # Locate the runtime — works whether the package is at templates/megamaid or src/megamaid
+    recon_path = _module_path(repo_root, "recon.py")
+    runtime_parent = recon_path.parent.parent  # templates/ or src/
+
+    # Subprocess script: import megamaid.recon, then report whether playwright loaded
+    script = f"""
+import sys
+sys.path.insert(0, {str(runtime_parent)!r})
+import megamaid.recon
+print('PLAYWRIGHT_LOADED' if 'playwright' in sys.modules else 'CLEAN')
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, (
+        f"megamaid.recon import failed with exit code {result.returncode}. stderr: {result.stderr}"
+    )
+
+    assert result.stdout.strip() == "CLEAN", (
+        f"Importing megamaid.recon loaded playwright into sys.modules. "
+        f"This breaks the MCP cold-start optimization. "
+        f"stdout: {result.stdout}, stderr: {result.stderr}"
+    )
