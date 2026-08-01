@@ -8,8 +8,8 @@
 
 **megamaid** comes in two flavors:
 
-- **[Claude Code skill](#installation--as-a-claude-code-skill)** — Claude reads the pattern playbooks and writes a bespoke scraper for your target. Interactive, code-generating, one site at a time.
-- **[MCP server](#installation--as-an-mcp-server-megamaid-mcp)** — exposes `megamaid_recon` and `megamaid_run` as callable tools for agents, automation workflows, and scripts. No Claude session required.
+- **[Claude Code skill](#installation)** — Claude reads the pattern playbooks and writes a bespoke scraper for your target. Interactive, code-generating, one site at a time.
+- **[MCP server](#installation)** — exposes `megamaid_recon` and `megamaid_run` as callable tools for agents, automation workflows, and scripts. No Claude session required.
 
 Both ship from the same repo. Both produce the same output: self-contained Python projects that vacuum content into local files — raw HTML/JSON, normalized Markdown, and optionally images — with rate limiting, retry logic, and crash-resumable manifest tracking.
 
@@ -104,79 +104,66 @@ See [`EXAMPLES.md`](EXAMPLES.md) for end-to-end walkthroughs: downloading produc
 
 Most scraper bugs are the equivalent of raspberry jam. See `references/troubleshooting.md` for selector drift, timeouts, blocks, and the stealth workaround for anti-bot CDNs.
 
-## Installation — as a Claude Code skill
+## Installation
 
 > _"One command. Even I can do it, and I'm half-dog."_
 >
 > — Barf
 
 ```bash
-git clone git@github.com:whiffernet/megamaid.git ~/.claude/skills/megamaid
+claude plugin marketplace add whiffernet/megamaid && claude plugin install megamaid@whiffernet
 ```
 
-Verify it registered:
+That is the whole install. It registers the skill, the `/megamaid-doctor` command, and the
+`megamaid` MCP server. Ask Claude to "scrape a website" and the skill takes over.
+
+**Requires:** Python 3.11+ and git. No Docker, no `uv`, no tokens, no config files to edit.
+
+On the MCP server's first start, a small virtualenv is built under
+`~/.local/state/megamaid/` (9–14 seconds depending on pip cache warmth; roughly 70 packages,
+no browser download). It is stamped with the plugin version, so `claude plugin update megamaid`
+refreshes it automatically on the next start.
+
+### Running megamaid commands
+
+A plugin install puts nothing on your PATH. There are two command forms, and they are not
+interchangeable:
+
+**URL-scoped** (`recon`, `map`, `init`) — no project needed, run from anywhere via the
+launcher:
 
 ```bash
-ls ~/.claude/skills/megamaid/SKILL.md
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli recon https://example.com
 ```
 
-The skill is auto-discovered via `SKILL.md`. Ask Claude to "scrape a website" or "build a scraper for X" and it will invoke megamaid.
-
-**Requires:** Python 3.11+ on the host. Everything else installs automatically when a project is scaffolded.
-
-## Installation — as an MCP server (megamaid-mcp)
-
-> _"They said it couldn't be done. I said I hadn't tried yet."_
->
-> — Lone Starr, probably
-
-The MCP server lets agents, automation workflows, and scripts call megamaid without opening a Claude session. Full instructions: [`mcp/README.md`](mcp/README.md).
-
-**Quick start:**
-
-1. Populate your `.env` (run once, from the same directory as `docker-compose.yml`):
+**Project-scoped** (`suck`, `status`, `diff`, `export`) — run inside a scraped project
+directory, where `targets/` and `.venv/` live:
 
 ```bash
-echo "MCP_BEARER_TOKEN=$(openssl rand -hex 32)" >> .env
-echo "MEGAMAID_UID_GID=$(id -u):$(id -g)" >> .env
+.venv/bin/megamaid suck
 ```
 
-2. Add to your `docker-compose.yml`:
-
-```yaml
-megamaid:
-  image: ghcr.io/whiffernet/megamaid:latest
-  container_name: megamaid-mcp
-  user: "${MEGAMAID_UID_GID}"
-  ports:
-    - "127.0.0.1:8305:8000"
-  volumes:
-    - "${MEGAMAID_PROJECTS_DIR:-$HOME}:/projects:rw"
-  environment:
-    - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN}
-    - MEGAMAID_PROJECTS_DIR_INTERNAL=/projects
-  restart: unless-stopped
-```
-
-2. Register with Claude Code — add to `~/.claude/mcp.json`:
-
-```json
-{
-  "megamaid": {
-    "type": "http",
-    "url": "http://localhost:8305",
-    "headers": { "Authorization": "Bearer ${MCP_BEARER_TOKEN}" }
-  }
-}
-```
-
-3. Start it:
+If you want a short name for the launcher form, symlink it — optional, and required by
+nothing:
 
 ```bash
-docker compose up -d megamaid
+ln -s ~/.local/state/megamaid/venv/bin/megamaid ~/.local/bin/megamaid
 ```
 
-The four `megamaid_*` tools will appear in Claude's tool list on next launch.
+### Something wrong?
+
+Run `/megamaid-doctor` in Claude Code. It reads `~/.local/state/megamaid/launch.log` and
+explains the last failure — including the case where Claude Code killed a slow first build,
+which leaves nothing on screen but "Failed to connect".
+
+### Using the MCP server without Claude Code
+
+The server is a normal console script, so any MCP client can spawn it over stdio:
+
+```bash
+pipx install "git+https://github.com/whiffernet/megamaid@v0.9.0#egg=megamaid[mcp]"
+megamaid-mcp
+```
 
 ## License
 
