@@ -2,6 +2,8 @@
 
 import json
 
+from conftest import find_bare_megamaid_invocations
+
 
 def test_mcp_json_has_no_mcpservers_wrapper(repo_root):
     """Plugin .mcp.json is a bare {name: config} mapping — see the playwright plugin."""
@@ -19,11 +21,8 @@ def test_mcp_json_invokes_the_launcher_via_plugin_root(repo_root):
 def test_commands_never_invoke_a_bare_megamaid(repo_root):
     """claude plugin install puts nothing on PATH; every invocation goes via --cli."""
     for path in (repo_root / "commands").glob("*.md"):
-        text = path.read_text()
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("megamaid ") or stripped.startswith("$ megamaid "):
-                raise AssertionError(f"{path.name}: bare megamaid invocation: {stripped!r}")
+        offenders = find_bare_megamaid_invocations(path.read_text())
+        assert not offenders, f"{path.name}: bare megamaid invocation(s): {offenders}"
 
 
 def test_doctor_command_exists_with_frontmatter(repo_root):
