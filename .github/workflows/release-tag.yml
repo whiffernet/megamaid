@@ -14,10 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - name: Skip if HEAD already tagged (human tagged manually)
+      - name: Skip if HEAD already carries a semver tag (human tagged manually)
         id: check
         run: |
-          if [ -n "$(git tag --points-at HEAD)" ]; then
+          # Filter to v* — `claude plugin tag` creates megamaid--v<version>
+          # tags, and an unfiltered check would let one of those suppress the
+          # semver tag entirely.
+          if [ -n "$(git tag --list 'v*' --points-at HEAD)" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
