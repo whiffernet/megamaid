@@ -40,7 +40,7 @@ jobs:
       - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - run: pip install playwright httpx pydantic click fastmcp mypy
-      - run: mypy src/ templates/ --ignore-missing-imports
+      - run: mypy src/ templates/ scripts/ --ignore-missing-imports
 
   test:
     runs-on: ubuntu-latest
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[mcp,cli,dev]"
       - run: python -m pytest tests/ -v --ignore=tests/integration
 
   plugin-validate:
