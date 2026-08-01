@@ -37,12 +37,27 @@ def test_console_scripts_declared(repo_root):
 
 
 def test_version_is_sourced_from_plugin_manifest(repo_root):
-    """One version source. pyproject must not hardcode a second."""
-    project = _pyproject(repo_root)["project"]
+    """One version source. pyproject must not hardcode a second.
+
+    Deliberately asserts no literal version: this file used to pin "0.9.0",
+    which meant the first `claude plugin update`-worthy bump turned the suite
+    red for no reason. What matters is the wiring — that setuptools reads the
+    mirror of plugin.json's version rather than carrying its own copy — and
+    tests/test_manifests.py separately pins mirror == plugin.json.
+    """
+    pyproject = _pyproject(repo_root)
+    project = pyproject["project"]
     assert "version" not in project, "version must be dynamic, not literal"
     assert "version" in project["dynamic"]
+
+    dynamic_source = pyproject["tool"]["setuptools"]["dynamic"]["version"]["file"]
+    assert dynamic_source == ".claude-plugin/VERSION.txt", (
+        f"setuptools must read the plugin-manifest mirror, got {dynamic_source!r}"
+    )
+
     manifest = json.loads((repo_root / ".claude-plugin" / "plugin.json").read_text())
-    assert manifest["version"] == "0.9.0"
+    mirror = (repo_root / dynamic_source).read_text().strip()
+    assert mirror == manifest["version"]
 
 
 def test_cli_extra_contains_click_and_excludes_heavy_scraper_dependencies(repo_root):

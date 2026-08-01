@@ -152,11 +152,17 @@ def assert_public_url(url: str) -> None:
     Raises:
         NetGuardError: MM-42 when the scheme is not http(s) or the host is private.
     """
-    if _private_networks_allowed():
-        return
+    # Scheme first, and deliberately ABOVE the escape hatch. The env var means
+    # "I am scraping an intranet", which is a statement about network reach,
+    # not about protocols: file:// and ftp:// are refused either way. With the
+    # order reversed, MEGAMAID_ALLOW_PRIVATE_NETWORKS=1 also silently turned
+    # off scheme validation, so file:///etc/passwd sailed through a guard
+    # nobody thought they had disabled.
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise NetGuardError("MM-42", f"Refusing non-HTTP(S) URL: {url}")
+    if _private_networks_allowed():
+        return
     if is_private_host(parsed.hostname or ""):
         raise NetGuardError(
             "MM-42",

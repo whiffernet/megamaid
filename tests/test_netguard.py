@@ -92,6 +92,36 @@ def test_escape_hatch_allows_private_networks(monkeypatch):
     assert_public_url("http://192.168.1.10/")  # must not raise
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "ftp://example.com/secrets.tar",
+        "gopher://example.com/",
+        "data:text/html,<script>x</script>",
+    ],
+)
+def test_non_http_schemes_are_rejected(url):
+    with pytest.raises(NetGuardError) as excinfo:
+        assert_public_url(url)
+    assert excinfo.value.code == "MM-42"
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/secrets.tar"])
+def test_escape_hatch_still_rejects_non_http_schemes(url, monkeypatch):
+    """The env var means "I am scraping an intranet", not "disable the guard".
+
+    The scheme check used to sit *below* the escape hatch, so setting
+    MEGAMAID_ALLOW_PRIVATE_NETWORKS=1 to reach a LAN host also silently turned
+    off file:// and ftp:// rejection — a strictly wider hole than the one the
+    operator opted into.
+    """
+    monkeypatch.setenv("MEGAMAID_ALLOW_PRIVATE_NETWORKS", "1")
+    with pytest.raises(NetGuardError) as excinfo:
+        assert_public_url(url)
+    assert excinfo.value.code == "MM-42"
+
+
 def test_public_url_passes():
     assert_public_url("https://example.com/sitemap.xml")
 

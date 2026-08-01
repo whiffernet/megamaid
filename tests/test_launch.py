@@ -3,6 +3,7 @@ stdlib-only and every subprocess call is injected."""
 
 import ast
 import importlib.util
+import json
 import subprocess
 
 import pytest
@@ -58,8 +59,17 @@ def test_launcher_imports_only_stdlib(repo_root):
 
 
 def test_plugin_version_reads_the_manifest(repo_root):
+    """Compared against plugin.json, not a literal.
+
+    A hardcoded "0.9.0" here would turn the suite red on the first version
+    bump — a self-breaking test rather than a guard. The stamp values in the
+    tmp_path tests below stay literal on purpose: those are arbitrary
+    sentinels for stamp-comparison logic and never touch the real manifest.
+    """
     mod = _load(repo_root)
-    assert mod.plugin_version(repo_root) == "0.9.0"
+    expected = json.loads((repo_root / ".claude-plugin" / "plugin.json").read_text())["version"]
+    assert expected, "plugin.json carries no version — nothing to compare against"
+    assert mod.plugin_version(repo_root) == expected
 
 
 def test_state_dir_honours_env_override(repo_root, tmp_path, monkeypatch):

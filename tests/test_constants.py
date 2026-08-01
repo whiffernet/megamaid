@@ -3,10 +3,15 @@
 The MCP server imports megamaid.recon. If that transitively imports playwright,
 the MCP venv needs a 40 MB wheel plus a 150 MB chromium download, and cold start
 blows Claude Code's 30-second connect budget.
+
+This file also owns the User-Agent/version relationship — see
+test_user_agent_version_tracks_the_plugin_manifest.
 """
 
 import ast
+import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -34,6 +39,37 @@ def test_constants_module_imports_nothing_heavy(repo_root):
     imports = _imported_modules(_module_path(repo_root, "constants.py"))
     assert "playwright" not in imports
     assert imports <= {"__future__"}, f"constants.py must stay dependency-free, got {imports}"
+
+
+def test_user_agent_version_tracks_the_plugin_manifest(repo_root):
+    """DEFAULT_USER_AGENT's version segment must match plugin.json's major.minor.
+
+    The constant hardcodes `megamaid/0.9`, which stops matching the plugin at
+    0.10.0. Two ways to fix that; this project takes the second:
+
+    1. Derive it at runtime from `importlib.metadata.version("megamaid")`.
+       Rejected: constants.py is copied *verbatim* into every scaffolded
+       project, and those projects rename the distribution (a real one on this
+       machine declares `name = "megamaid-scraper"`), so the lookup raises
+       PackageNotFoundError exactly where the runtime is vendored. Wrapping it
+       in a try/except with a literal fallback reintroduces the same drift
+       behind more machinery, and the fallback is the branch that would
+       actually run in a scraped project.
+
+    2. Keep the literal and pin the relationship here. A version bump then
+       fails one test with an obvious fix, instead of silently shipping a
+       User-Agent that misidentifies the tool to every site it visits.
+    """
+    version = json.loads((repo_root / ".claude-plugin" / "plugin.json").read_text())["version"]
+    major, minor = version.split(".")[:2]
+
+    source = _module_path(repo_root, "constants.py").read_text()
+    match = re.search(r"megamaid/(\d+\.\d+)", source)
+    assert match, "DEFAULT_USER_AGENT must identify as megamaid/<major>.<minor>"
+    assert match.group(1) == f"{major}.{minor}", (
+        f"DEFAULT_USER_AGENT says megamaid/{match.group(1)} but plugin.json is "
+        f"{version} — update src/megamaid/constants.py to megamaid/{major}.{minor}"
+    )
 
 
 def test_recon_does_not_import_base(repo_root):
