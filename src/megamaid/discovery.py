@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 import httpx
 from playwright.async_api import Page
 
+from .constants import DEFAULT_USER_AGENT
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,7 +252,7 @@ async def sitemap_discovery(
         base_url: Site root URL (e.g. https://example.com).
         product_patterns: URL substrings to filter product pages.
         user_agent: Custom User-Agent header for sitemap requests.
-            Defaults to a Chrome-like UA string if not specified.
+            Defaults to ``megamaid.constants.DEFAULT_USER_AGENT`` if not specified.
         extract_images: If True, also parse ``<image:image>`` tags and
             return ``SitemapProduct`` objects instead of plain URL strings.
 
@@ -265,10 +267,7 @@ async def sitemap_discovery(
         product_patterns = ["/p/", "/product/", "/products/", "/dp/", "/ip/", "/pd/"]
 
     if user_agent is None:
-        user_agent = (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        )
+        user_agent = DEFAULT_USER_AGENT
 
     ns = {
         "sm": "http://www.sitemaps.org/schemas/sitemap/0.9",
