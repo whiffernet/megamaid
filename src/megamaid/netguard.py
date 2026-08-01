@@ -25,6 +25,19 @@ MAX_COMPRESSED_BYTES = 8_000_000
 
 ALLOW_PRIVATE_ENV = "MEGAMAID_ALLOW_PRIVATE_NETWORKS"
 
+# Ranges the stdlib ipaddress classification flags do not cover for our purposes.
+#
+#   RFC 6598 Shared Address Space, 100.64.0.0/10 ("CGNAT"). The stdlib docs for
+#   is_private/is_global spell out an explicit exception: "``is_private`` has
+#   value opposite to ``is_global``, except for the ``100.64.0.0/10`` IPv4
+#   range where they are [both False]." Confirmed empirically on this Python
+#   (3.12.3): ipaddress.ip_address("100.64.0.1").is_private is False and
+#   .is_global is also False, so neither flag this module already checks
+#   catches it. This range matters concretely here: it is Tailscale's default
+#   mesh address space, so treating it as public would let a page redirect
+#   straight into a private overlay network.
+_EXTRA_PRIVATE_NETWORKS = (ipaddress.ip_network("100.64.0.0/10"),)
+
 
 class NetGuardError(Exception):
     """A guard refused a request or a payload.
@@ -42,14 +55,57 @@ def _private_networks_allowed() -> bool:
     return os.environ.get(ALLOW_PRIVATE_ENV, "") not in ("", "0", "false", "False")
 
 
+def _refuse_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """True when a single already-resolved address must be refused.
+
+    Checks the stdlib classification flags plus the extra ranges those flags
+    miss (see _EXTRA_PRIVATE_NETWORKS) — currently just CGNAT.
+
+    Args:
+        address: a resolved, concrete IPv4 or IPv6 address (already unwrapped
+            if it was IPv4-mapped — see is_private_host).
+
+    Returns:
+        True when this exact address must not be fetched.
+    """
+    if (
+        address.is_loopback
+        or address.is_link_local
+        or address.is_private
+        or address.is_unspecified
+        or address.is_reserved
+        or address.is_multicast
+    ):
+        return True
+    return any(address in network for network in _EXTRA_PRIVATE_NETWORKS)
+
+
 def is_private_host(host: str) -> bool:
     """True when host resolves to any address we refuse to fetch.
 
     Covers loopback, link-local (including the 169.254.169.254 cloud metadata
-    endpoint), private ranges, unspecified, reserved and multicast, for both
-    IPv4 and IPv6. A hostname is resolved first, and is considered private if
-    ANY of its addresses is — a name resolving to both a public and a private
-    address must not be treated as safe.
+    endpoint), private ranges, unspecified, reserved, multicast, and CGNAT
+    (100.64.0.0/10 — see _EXTRA_PRIVATE_NETWORKS), for both IPv4 and IPv6. A
+    hostname is resolved first, and is considered private if ANY of its
+    addresses is — a name resolving to both a public and a private address
+    must not be treated as safe (DNS rebinding).
+
+    IPv4-mapped IPv6 addresses (``::ffff:a.b.c.d``) are unwrapped and checked
+    as the plain IPv4 address underneath. Empirically, on this Python
+    (3.12.3) the *wrapped* form is unreliable in both directions: every
+    address in ``::ffff:0:0/96`` has ``is_reserved`` unconditionally True —
+    including ``::ffff:93.184.216.34``, a wrapped *public* address — while
+    ``is_loopback``/``is_private`` are False for a wrapped loopback or CGNAT
+    address. Checking the wrapped form directly would both over-block public
+    targets and under-block private ones; unwrapping first fixes both.
+
+    IPv6 unique-local addresses (``fc00::/7``, RFC 4193) need no special
+    handling: stdlib's ``is_private`` already covers the full range (verified
+    at both the ``fc00::`` and ``fdff:ffff:ffff:ffff::`` ends; a genuine
+    public IPv6 address just outside it, e.g. ``2001:4860:4860::8888``, is
+    correctly not private — ``fe00::``, though also outside fc00::/7, is a
+    poor boundary probe because it lands in IANA's separate reserved
+    ``fe00::/9`` block and trips ``is_reserved`` for an unrelated reason).
 
     Args:
         host: hostname or literal IP address.
@@ -74,14 +130,10 @@ def is_private_host(host: str) -> bool:
             address = ipaddress.ip_address(candidate)
         except ValueError:
             return True
-        if (
-            address.is_loopback
-            or address.is_link_local
-            or address.is_private
-            or address.is_unspecified
-            or address.is_reserved
-            or address.is_multicast
-        ):
+        mapped = getattr(address, "ipv4_mapped", None)
+        if mapped is not None:
+            address = mapped
+        if _refuse_address(address):
             return True
     return False
 

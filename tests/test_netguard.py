@@ -5,13 +5,16 @@ its bridge network made host loopback unreachable, and its 512 MB memory cap
 bounded an otherwise unbounded gzip.decompress.
 """
 
+import asyncio
 import gzip
 import sys
 
+import httpx
 import pytest
 
 sys.path.insert(0, "src")
 
+from megamaid import netguard  # noqa: E402
 from megamaid.netguard import (  # noqa: E402
     NetGuardError,
     assert_public_url,
@@ -32,13 +35,41 @@ from megamaid.netguard import (  # noqa: E402
         "169.254.169.254",
         "::1",
         "fd00::1",
+        # RFC 6598 Shared Address Space ("CGNAT") — not flagged by any stdlib
+        # is_* property (see netguard._EXTRA_PRIVATE_NETWORKS). Concretely,
+        # this is Tailscale's default mesh address space.
+        "100.64.0.1",
+        "100.127.255.254",
+        # IPv6 unique-local, RFC 4193 — the far end of fc00::/7.
+        "fdff:ffff:ffff:ffff::1",
+        # IPv4-mapped IPv6 wrapping a private/loopback/CGNAT address must
+        # still be refused after being unwrapped to the plain v4 form.
+        "::ffff:127.0.0.1",
+        "::ffff:100.64.0.1",
     ],
 )
 def test_private_and_loopback_hosts_are_rejected(host):
     assert is_private_host(host) is True
 
 
-@pytest.mark.parametrize("host", ["example.com", "93.184.216.34", "8.8.8.8"])
+@pytest.mark.parametrize(
+    "host",
+    [
+        "example.com",
+        "93.184.216.34",
+        "8.8.8.8",
+        # Just outside the CGNAT range on both ends.
+        "100.63.255.255",
+        "100.128.0.1",
+        # A genuine public IPv6 address, to confirm fc00::/7 is not overbroad.
+        "2001:4860:4860::8888",
+        # IPv4-mapped IPv6 wrapping a public address. Every address in
+        # ::ffff:0:0/96 has is_reserved unconditionally True in stdlib
+        # (verified directly), so without unwrapping this would be a false
+        # positive — a legitimate public target wrongly refused.
+        "::ffff:93.184.216.34",
+    ],
+)
 def test_public_hosts_are_allowed(host):
     assert is_private_host(host) is False
 
@@ -96,3 +127,52 @@ def test_recon_no_longer_calls_unbounded_gzip_decompress(repo_root):
     source = (repo_root / "src" / "megamaid" / "recon.py").read_text()
     assert "gzip.decompress(" not in source
     assert "safe_gunzip(" in source
+
+
+def test_guard_fires_on_the_redirect_hop_not_just_the_initial_url(monkeypatch):
+    """The event hook must run again on the redirect target, not only on the
+    URL the caller originally asked for.
+
+    This exists because a pre-flight check on the initial URL cannot see
+    where a redirect leads: a page that looks public can 302 to a private
+    address, and only a check that re-runs on every hop catches that. Do NOT
+    delete this as redundant with test_assert_public_url_raises_mm42_for_loopback
+    — that test only proves the underlying check is correct in isolation, not
+    that httpx is actually wired to call it again per hop.
+
+    Hermetic: httpx.MockTransport stands in for the network (the transport
+    must never be asked for the private redirect target — reaching it is a
+    hard test failure), and is_private_host is monkeypatched to a fixed
+    public/private mapping so nothing here depends on live DNS.
+    """
+    seen_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        if request.url.host == "public.example":
+            return httpx.Response(302, headers={"Location": "http://internal.example/admin"})
+        raise AssertionError(
+            f"transport reached for {request.url} — the guard should have blocked "
+            "this hop before it was ever dispatched"
+        )
+
+    def fake_is_private_host(host: str) -> bool:
+        return {"public.example": False, "internal.example": True}[host]
+
+    monkeypatch.setattr(netguard, "is_private_host", fake_is_private_host)
+
+    async def make_request() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            follow_redirects=True,
+            event_hooks={"request": [netguard.guard_request]},
+        ) as client:
+            return await client.get("http://public.example/")
+
+    with pytest.raises(NetGuardError) as excinfo:
+        asyncio.run(make_request())
+
+    assert excinfo.value.code == "MM-42"
+    assert seen_urls == ["http://public.example/"], (
+        f"transport must be reached only for the public hop; saw {seen_urls}"
+    )
