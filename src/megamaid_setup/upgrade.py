@@ -20,6 +20,7 @@ import os
 import pathlib
 import re
 import shutil
+import warnings
 from dataclasses import dataclass, field
 
 from .manifest import Manifest
@@ -102,7 +103,16 @@ def classify(path: pathlib.Path, manifest: Manifest) -> Tier:
         return Tier.EXACT
 
     try:
-        if ast.dump(ast.parse(raw.decode())) in known_asts:
+        # Parsing arbitrary user code emits SyntaxWarnings the user can do
+        # nothing about and that are not this tool's finding — six of them
+        # ("invalid escape sequence '\\d'", from regexes in non-raw strings)
+        # printed ahead of the report on the real fleet. `filename` is passed
+        # so that anything which does escape names the file it came from
+        # rather than "<unknown>".
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            tree = ast.parse(raw.decode(), filename=str(path))
+        if ast.dump(tree) in known_asts:
             return Tier.COSMETIC
     except (SyntaxError, UnicodeDecodeError):
         return Tier.DIVERGENT
@@ -434,9 +444,7 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
     return newest
 
 
-def shared_variants(
-    plans: list[ProjectPlan], contents: dict[tuple[str, str], list[str]] | None = None
-) -> dict[tuple[str, str], list[str]]:
+def shared_variants(plans: list[ProjectPlan]) -> dict[tuple[str, str], list[str]]:
     """Group refused files by (filename, content hash) across projects.
 
     A variant appearing in several independent projects is not several hand
@@ -445,20 +453,17 @@ def shared_variants(
 
     Args:
         plans: the planned projects.
-        contents: pre-computed mapping, injected by tests. When None, hashes are
-            read from disk.
 
     Returns:
         {(filename, short-hash): [project names]} for variants shared by 2+.
     """
-    if contents is None:
-        contents = collections.defaultdict(list)
-        for plan in plans:
-            for act in plan.refused:
-                path = plan.project / "megamaid" / act.name
-                if path.is_file():
-                    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:8]
-                    contents[(act.name, digest)].append(plan.project.name)
+    contents: dict[tuple[str, str], list[str]] = collections.defaultdict(list)
+    for plan in plans:
+        for act in plan.refused:
+            path = plan.project / "megamaid" / act.name
+            if path.is_file():
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+                contents[(act.name, digest)].append(plan.project.name)
     return {k: v for k, v in contents.items() if len(v) > 1}
 
 

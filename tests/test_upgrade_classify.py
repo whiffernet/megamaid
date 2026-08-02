@@ -10,7 +10,6 @@ from megamaid_setup.manifest import Manifest  # noqa: E402
 from megamaid_setup.upgrade import Tier, classify  # noqa: E402
 
 KNOWN_SOURCE = "x = 1\n"
-KNOWN_HASH = "9d4a8a4b6a2d1e1c9c1f0a8f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b"
 
 
 def _manifest(tmp_path):
@@ -85,4 +84,29 @@ def test_unknown_filename_is_divergent_not_a_crash(tmp_path):
     an empty lookup, not a KeyError, and it lands on DIVERGENT."""
     f = tmp_path / "never-seen.py"
     f.write_text("# anything\n")
+    assert classify(f, _manifest(tmp_path)) is Tier.DIVERGENT
+
+
+def test_classifying_a_file_with_a_regex_escape_emits_no_warning(tmp_path, recwarn):
+    """Six `SyntaxWarning: invalid escape sequence '\\d'` lines printed ahead of
+    the report on the real fleet, from project files with a regex in a non-raw
+    string. They are not this tool's finding, the user cannot act on them, and
+    they arrived attributed to "<unknown>" because ast.parse was called without
+    a filename. Report output is the product here; noise in it is a defect."""
+    f = tmp_path / "a.py"
+    f.write_text('import re\nPAT = re.compile("\\d+")\n')
+
+    classify(f, _manifest(tmp_path))
+
+    offenders = [w for w in recwarn if issubclass(w.category, SyntaxWarning)]
+    assert not offenders, (
+        f"SyntaxWarning leaked into the report: {[str(w.message) for w in offenders]}"
+    )
+
+
+def test_a_file_that_does_not_parse_is_still_divergent(tmp_path):
+    """Silencing warnings must not silence the SyntaxError that makes an
+    unparseable file refuse rather than get overwritten."""
+    f = tmp_path / "a.py"
+    f.write_text("def broken( :\n")
     assert classify(f, _manifest(tmp_path)) is Tier.DIVERGENT

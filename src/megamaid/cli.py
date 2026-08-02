@@ -604,8 +604,13 @@ def _exit_code(plans: list[ProjectPlan], failures: list[Path]) -> int:
 
     Three outcomes a calling script can tell apart:
         0 — every project converges cleanly (or, on --dry-run, would).
-        1 — nothing crashed, but at least one project has a refused file or
-            an unreachable add that needs a human decision.
+        1 — nothing crashed, but at least one project has a refused file
+            that needs a human decision. This is the only condition tested:
+            `plan.converges` is false exactly when something was refused.
+            An unreachable add is covered as a consequence rather than by a
+            second check — a file is only unreachable when every entry point
+            that dispatches it is DIVERGENT, which is itself a refusal — so
+            there is no state where an unreachable add returns 0.
         2 — a project could not even be read, or an apply/rollback call
             actually raised.
 
