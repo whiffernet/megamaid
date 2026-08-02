@@ -1,5 +1,5 @@
 {
-  "generated_from": "99f46efedaf112db374ff2d8dff5e62ae171cded",
+  "generated_from": "2f1e6d5bb6411d4bda9a89054dcffc333d4cfb76",
   "hashes": {
     "__init__.py": [
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -31,6 +31,7 @@
       "f41423b8a64c1af509368eb296521e5c14a0150e15047007039e07477dad3562"
     ],
     "constants.py": [
+      "1af4a33234c81134bfc74dbc4ddb917291f0ff379e2ee7e57b25b6321a342d26",
       "8033c1096cffaccb621271b0feb671ffa5b08cbc73bd7773a48347f6bd428245",
       "87d882d3c3b0553649a1430e468090a25446175706a4efc69c5a31fad8a94cf4"
     ],
@@ -111,6 +112,7 @@
     ],
     "constants.py": [
       "Module(body=[Expr(value=Constant(value=\"Dependency-free constants shared across the megamaid runtime.\\n\\nThis module exists so that light consumers \u2014 notably `recon`, which the MCP\\nserver imports \u2014 can reach shared values without pulling in `base`, and\\ntherefore without pulling in playwright. Keep it import-free: anything added\\nhere lands in the MCP server's dependency closure.\\n\")), ImportFrom(module='__future__', names=[alias(name='annotations')], level=0), Assign(targets=[Name(id='DEFAULT_USER_AGENT', ctx=Store())], value=Constant(value='megamaid/0.10 (+https://github.com/whiffernet/megamaid) Mozilla/5.0 (compatible; Chromium/131)'))], type_ignores=[])",
+      "Module(body=[Expr(value=Constant(value=\"Dependency-free constants shared across the megamaid runtime.\\n\\nThis module exists so that light consumers \u2014 notably `recon`, which the MCP\\nserver imports \u2014 can reach shared values without pulling in `base`, and\\ntherefore without pulling in playwright. Keep it import-free: anything added\\nhere lands in the MCP server's dependency closure.\\n\")), ImportFrom(module='__future__', names=[alias(name='annotations')], level=0), Assign(targets=[Name(id='DEFAULT_USER_AGENT', ctx=Store())], value=Constant(value='megamaid/0.11 (+https://github.com/whiffernet/megamaid) Mozilla/5.0 (compatible; Chromium/131)'))], type_ignores=[])",
       "Module(body=[Expr(value=Constant(value=\"Dependency-free constants shared across the megamaid runtime.\\n\\nThis module exists so that light consumers \u2014 notably `recon`, which the MCP\\nserver imports \u2014 can reach shared values without pulling in `base`, and\\ntherefore without pulling in playwright. Keep it import-free: anything added\\nhere lands in the MCP server's dependency closure.\\n\")), ImportFrom(module='__future__', names=[alias(name='annotations')], level=0), Assign(targets=[Name(id='DEFAULT_USER_AGENT', ctx=Store())], value=Constant(value='megamaid/0.9 (+https://github.com/whiffernet/megamaid) Mozilla/5.0 (compatible; Chromium/131)'))], type_ignores=[])"
     ],
     "discovery.py": [
