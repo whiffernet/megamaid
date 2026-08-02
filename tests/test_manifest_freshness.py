@@ -6,6 +6,7 @@ That failure is silent and self-justifying, so it is a CI gate rather than a
 release-checklist line.
 """
 
+import hashlib
 import importlib.util
 import json
 import pathlib
@@ -89,3 +90,182 @@ def test_check_flag_passes_when_the_redirected_target_matches_head(tmp_path, mon
     monkeypatch.setattr(module, "MANIFEST", fake_target)
 
     assert module.main(["--check"]) == 0
+
+
+# --- what the manifest is allowed to trust ---------------------------------
+#
+# The manifest is the trust set: anything in it is "an old release, safe to
+# replace". Building it from `git rev-list --all` meant *any content that ever
+# existed on any ref* vouched for itself — including a branch someone pushed,
+# thought better of, and abandoned. That is the one place the design leaned the
+# wrong way on its own asymmetry: everything else resolves ambiguity toward
+# refusing, this resolved "someone once typed this on a branch" toward
+# overwriting it.
+
+
+def _repo(tmp_path):
+    """A throwaway git repo shaped like this one: src/megamaid/, tags, branches.
+
+    Identity is set repo-locally so this never reads or writes global git
+    config, and the default branch is named explicitly so the test does not
+    depend on the host's `init.defaultBranch`.
+    """
+    root = tmp_path / "repo"
+    (root / "src" / "megamaid").mkdir(parents=True)
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "test")
+    return root, git
+
+
+def _commit(root, git, contents: str, message: str):
+    (root / "src" / "megamaid" / "images.py").write_text(contents)
+    git("add", "-A")
+    git("commit", "-q", "-m", message)
+
+
+def test_a_blob_only_ever_on_an_abandoned_branch_is_not_trusted(tmp_path):
+    """The exploit is the workflow the tool's own report recommends.
+
+    `render()` prints "Shared variants - candidates to backport upstream" and
+    names five projects' hand-edited images.py. Take the suggestion: paste that
+    variant into src/megamaid/images.py on a spike branch, commit, decide
+    against it, abandon the branch without merging. HEAD is unchanged — but a
+    walk of every ref has now recorded the variant, and those five projects'
+    files flip from DIVERGENT (refused, protected) to EXACT (overwritten
+    silently). Pushing the branch, or opening and closing a PR from it, spreads
+    the poisoned trust set to every clone that fetches it.
+    """
+    module = _load_build_script()
+    root, git = _repo(tmp_path)
+
+    _commit(root, git, "SHIPPED = 1\n", "release")
+    git("tag", "v0.1.0")
+
+    hand_edit = "HAND_EDITED_IN_A_PROJECT = 1\n"
+    git("checkout", "-q", "-b", "spike")
+    _commit(root, git, hand_edit, "try the backport")
+    git("checkout", "-q", "main")
+
+    manifest = module.build_manifest(root)
+    poisoned = hashlib.sha256(hand_edit.encode()).hexdigest()
+
+    assert poisoned not in manifest["hashes"]["images.py"], (
+        "a variant that only ever existed on an abandoned branch is in the trust set — "
+        "every project holding that exact file would now be silently overwritten"
+    )
+    assert hashlib.sha256(b"SHIPPED = 1\n").hexdigest() in manifest["hashes"]["images.py"], (
+        "narrowing dropped released content too"
+    )
+
+
+def test_content_that_shipped_in_a_tag_stays_trusted_after_it_leaves_head(tmp_path):
+    """Narrowing must not throw away real releases. A file replaced on main
+    long ago is still what an old project has on disk, and is exactly what the
+    manifest exists to recognise."""
+    module = _load_build_script()
+    root, git = _repo(tmp_path)
+
+    _commit(root, git, "V1 = 1\n", "v1")
+    git("tag", "v0.1.0")
+    _commit(root, git, "V2 = 1\n", "v2")
+    git("tag", "v0.2.0")
+
+    hashes = module.build_manifest(root)["hashes"]["images.py"]
+    for source in (b"V1 = 1\n", b"V2 = 1\n"):
+        assert hashlib.sha256(source).hexdigest() in hashes, f"{source!r} fell out of the manifest"
+
+
+def test_the_current_runtime_is_always_in_its_own_manifest(tmp_path):
+    """Whatever HEAD ships must classify EXACT against the manifest shipped
+    beside it, or `upgrade` refuses to overwrite files it wrote itself and a
+    second run reports the whole runtime as divergent."""
+    module = _load_build_script()
+    root, git = _repo(tmp_path)
+
+    _commit(root, git, "V1 = 1\n", "v1")
+    git("tag", "v0.1.0")
+    _commit(root, git, "UNRELEASED = 1\n", "work since the last tag")
+
+    hashes = module.build_manifest(root)["hashes"]["images.py"]
+    assert hashlib.sha256(b"UNRELEASED = 1\n").hexdigest() in hashes
+
+
+def test_local_scratch_branches_do_not_change_what_a_contributor_generates(tmp_path):
+    """The manifest must be a function of the repo, not of whichever branches
+    a given clone happens to have lying around."""
+    module = _load_build_script()
+    root, git = _repo(tmp_path)
+
+    _commit(root, git, "SHIPPED = 1\n", "release")
+    git("tag", "v0.1.0")
+    before = module.build_manifest(root)["hashes"]
+
+    git("checkout", "-q", "-b", "scratch")
+    _commit(root, git, "SCRATCH = 1\n", "wip")
+    git("checkout", "-q", "main")
+
+    assert module.build_manifest(root)["hashes"] == before
+
+
+# --- a shallow checkout must say so, not cry "stale" -----------------------
+
+
+def test_a_shallow_checkout_is_reported_as_a_checkout_problem(tmp_path):
+    """CI checks out at fetch-depth 1, which starves the walk: the gate then
+    fails with a hash-count mismatch that reads exactly like a stale manifest
+    and sends the reader off regenerating a file that is already correct."""
+    module = _load_build_script()
+    root, git = _repo(tmp_path)
+    _commit(root, git, "V1 = 1\n", "v1")
+    git("tag", "v0.1.0")
+    _commit(root, git, "V2 = 1\n", "v2")
+    git("tag", "v0.2.0")
+
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", "--no-tags", f"file://{root}", str(shallow)],
+        check=True,
+        capture_output=True,
+    )
+
+    reason = module.truncated_checkout(shallow)
+    assert reason, "a --depth 1 clone was not recognised as a truncated checkout"
+    assert module.truncated_checkout(root) is None, "the full checkout was called truncated"
+
+
+def test_the_shallow_diagnostic_names_fetch_depth_zero(tmp_path, monkeypatch, capsys):
+    """The message has to carry the fix. A reader who sees only "N hashes vs M"
+    has no way to know the checkout, not the file, is what is wrong."""
+    module = _load_build_script()
+    root, git = _repo(tmp_path)
+    _commit(root, git, "V1 = 1\n", "v1")
+    git("tag", "v0.1.0")
+    _commit(root, git, "V2 = 1\n", "v2")
+    git("tag", "v0.2.0")
+
+    full_manifest = module.build_manifest(root)
+
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", "--no-tags", f"file://{root}", str(shallow)],
+        check=True,
+        capture_output=True,
+    )
+    target = shallow / "src" / "megamaid_setup" / "known_hashes.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(full_manifest))
+
+    monkeypatch.setattr(module, "REPO_ROOT", shallow)
+
+    assert module.main(["--check"]) == 1
+    err = capsys.readouterr().err
+    assert "fetch-depth: 0" in err, f"the diagnostic does not name the fix:\n{err}"
+    assert "is out of date" not in err, f"a truncated checkout was reported as staleness:\n{err}"
+    assert "do NOT regenerate" in err, (
+        f"the message must stop the reader regenerating a correct file:\n{err}"
+    )
