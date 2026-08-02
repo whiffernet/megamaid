@@ -77,6 +77,22 @@ def test_declared_version_is_parseable(declared):
     assert semver(declared), f"VERSION.txt holds {declared!r}, which is not bare semver"
 
 
+def test_readme_pins_the_current_version(declared):
+    """The pipx install line pins a tag, and a stale pin installs old code.
+
+    Same failure as #26, one file over: nothing errors, the reader just gets a
+    version that is not the one being documented around it.
+    """
+    readme = (ROOT / "README.md").read_text()
+    pinned = re.findall(r"megamaid@v(\d+\.\d+\.\d+)#egg=", readme)
+    assert pinned, "expected a pipx install line pinning megamaid@v<version>#egg="
+    stale = [version for version in pinned if version != declared]
+    assert not stale, (
+        f"README pins {', '.join(stale)} but VERSION.txt is {declared}. "
+        "Update the pipx install line."
+    )
+
+
 def test_version_is_never_behind_the_latest_tag(declared, latest_tag):
     """The exact failure of #26: tags advanced, VERSION.txt did not."""
     if latest_tag is None:
