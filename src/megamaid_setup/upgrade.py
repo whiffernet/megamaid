@@ -480,10 +480,11 @@ def render(plans: list[ProjectPlan]) -> str:
     dirty = [p for p in plans if p.refused]
     errored = [p for p in plans if p.error]
 
-    lines = [f"  {len(plans)} projects"]
-    lines.append(f"  {len(ok)} converge cleanly")
+    lines = [f"  {len(plans)} project{'' if len(plans) == 1 else 's'}"]
+    lines.append(f"  {len(ok)} converge{'s' if len(ok) == 1 else ''} cleanly")
     if dirty:
-        lines.append(f"  {len(dirty)} have divergent files - upgraded around them")
+        verb = "has" if len(dirty) == 1 else "have"
+        lines.append(f"  {len(dirty)} {verb} divergent files - upgraded around them")
     if errored:
         lines.append(f"  {len(errored)} could not be read")
 
@@ -505,6 +506,24 @@ def render(plans: list[ProjectPlan]) -> str:
             )
         lines.append("    -> review by hand: keep the edit, or replace it yourself if it should")
         lines.append("       have been the runtime file all along.")
+
+    # What upgrade replaced, which the report used to leave out entirely.
+    # EXACT overwrites lose nothing a human wrote, so they stay a count.
+    # COSMETIC is the case where a person's own text does not survive — a
+    # comment-only edit classifies COSMETIC and is overwritten — so those are
+    # named, with the file, the project, and where the bytes went.
+    replaced = [(p, a) for p in plans for a in p.actions if a.action == "overwrite"]
+    cosmetic = [(p, a) for p, a in replaced if a.tier is Tier.COSMETIC]
+    if replaced:
+        lines.append("")
+        lines.append(f"  {len(replaced)} file(s) replaced with the current runtime")
+        if cosmetic:
+            lines.append(
+                f"    {len(cosmetic)} of them differed only in comments or formatting - that"
+            )
+            lines.append("    text was replaced. The originals are in .megamaid-backups/:")
+            for plan, act in cosmetic:
+                lines.append(f"      {plan.project.name}: {act.name}")
 
     adds: collections.Counter = collections.Counter()
     for plan in plans:
