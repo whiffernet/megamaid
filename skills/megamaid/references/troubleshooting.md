@@ -203,3 +203,89 @@ if "api_key=" not in next_url:
 
 Delete `staging/<slug>/` and re-run with `--max 3`. Fresh state,
 small sample, one problem at a time.
+
+## `upgrade` refused a file (MM-32)
+
+```
+  2 file(s) refused - left exactly as found   [MM-32]
+    megamaid-walmart: images.py  (diverges from every known release)
+```
+
+Not a bug. That file is not byte-identical to any version megamaid shipped,
+and it does not differ from one purely in comments or formatting — so
+something changed it, and `upgrade` will not guess whether that something was
+you. It was left exactly as found.
+
+Three ways out, in the order they're usually right:
+
+1. **Keep the edit.** Do nothing. The file stays yours; the rest of the
+   project still upgraded around it.
+2. **Backport it.** If the edit should have been in the runtime all along —
+   and the report's **Shared variants** list is the tell, because the same
+   change showing up in several independent projects is template work that
+   never flowed upstream — open a PR against megamaid itself. Once it ships,
+   that content is recognized and the file converges on its own. Note that a
+   change living only on an unmerged branch is deliberately *not* trusted; it
+   has to actually land.
+3. **Take the new one.** Copy the current runtime file over yours by hand.
+   Your version is already in `.megamaid-backups/` from the same run.
+
+If a refusal surprises you, diff it: `diff megamaid-walmart/megamaid/images.py`
+against the same file in the plugin's `src/megamaid/`. A file that no longer
+parses as Python also lands here, and reads the same way in the report.
+
+## `upgrade` says a file it added cannot be invoked (MM-35)
+
+```
+  2 added files cannot be invoked   [MM-35]
+    megamaid-walmart: recon.py (needs cli.py)
+```
+
+The file was written, but everything that dispatches it was refused, so
+there is no way to reach it from the project's own CLI. `recon.py` is wired
+in from `cli.py`; if your `cli.py` is a hand-edited fork, it has no `recon`
+subcommand to route to.
+
+Resolve the MM-32 refusal on the file named in `(needs …)` and this goes with
+it. Until then the added file is inert, not broken — nothing else is affected.
+
+## `upgrade` says a directory is not a megamaid project (MM-31)
+
+```
+    megamaid-notes.txt: MM-31 not a megamaid project
+```
+
+There is no `megamaid/` directory inside it. Almost always a glob that caught
+more than you meant — `~/megamaid-*` matches loose files and unrelated
+directories that merely share the prefix. Nothing was written to it. Narrow
+the glob, or ignore the line.
+
+## `upgrade --rollback` found no backup (MM-36)
+
+```
+  x /home/you/megamaid-acehardware: MM-36 no backup found in .megamaid-backups
+```
+
+Either the project has never been upgraded, or its backups have already been
+pruned — only the three most recent are kept, so four upgrades later the first
+one is gone. Rollback restores the *most recent* backup only; it is not an
+undo stack.
+
+`.megamaid-backups/` is your directory, and `upgrade` deliberately ignores
+anything in it that it did not write, so a note or a tarball parked there will
+never be mistaken for a backup — and will never be deleted by the retention
+prune either. If you moved or renamed a backup directory, it is no longer
+recognized as one; put the name back (`YYYYMMDD-HHMMSS-<version>`) or restore
+it by hand — it is a plain directory copy of `megamaid/`.
+
+## `upgrade` reported nothing but refusals
+
+Every file in every project refused, including ones you never touched. That is
+the signature of a manifest that does not know about the releases your projects
+came from — the plugin's record of what it has shipped, `known_hashes.json`,
+is generated from git history and travels with the package.
+
+Check you are running the launcher's copy and not a source checkout that was
+never installed. If you are working *on* megamaid itself, regenerate it:
+`python3 scripts/build_known_hashes.py`. If that reports a shallow checkout,
+fetch the full history and tags first — it says so, and names the fix.

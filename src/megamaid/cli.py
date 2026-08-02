@@ -1,10 +1,24 @@
 """megamaid CLI entry point.
 
-Commands:
-    suck    — scrape the target (honors robots.txt, manifest-tracked)
-    status  — show the last run's manifest summary
-    diff    — compare the last two runs
-    init    — print scaffold instructions
+Commands, grouped by what they need to run — see README.md's "Running megamaid
+commands", which is the same split:
+
+URL-scoped (no project; run from the launcher's state venv)
+    recon    — probe a target and recommend a scraping pattern
+    map      — discover a domain's URLs (sitemap, plus a link crawl if a
+               browser is available)
+    init     — print scaffold instructions
+
+Project-scoped (run from inside a scraped project, which has targets/ and
+staging/)
+    suck     — scrape the target (honors robots.txt, manifest-tracked)
+    status   — show the last run's manifest summary
+    diff     — compare the last two runs
+    export   — write scraped docs out as CSV, JSONL or consolidated JSON
+
+Plugin-scoped (takes project directories as arguments; runs from the plugin)
+    upgrade  — converge scaffolded projects onto the current runtime, backing
+               each one up first and refusing anything the user has edited
 
 > "Switch to ludicrous speed? No. Regular speed is fine."
 """

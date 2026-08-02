@@ -148,12 +148,63 @@ directory, where `targets/` and `.venv/` live:
 .venv/bin/megamaid suck
 ```
 
+**Plugin-scoped** (`upgrade`) — takes project directories as arguments and runs from the
+plugin, never from inside a project. See [Upgrading scaffolded projects](#upgrading-scaffolded-projects).
+
 If you want a short name for the launcher form, symlink it — optional, and required by
 nothing:
 
 ```bash
 ln -s ~/.local/state/megamaid/venv/bin/megamaid ~/.local/bin/megamaid
 ```
+
+### Upgrading scaffolded projects
+
+Scaffolding **copies** the runtime into each project, so every project is a frozen fork of
+whatever megamaid version made it. `upgrade` converges them onto the current runtime — new
+modules like `src/megamaid/netguard.py` and `src/megamaid/recon.py`, plus every fix since,
+land in projects you built months ago, without re-scaffolding and without touching
+`targets/`, `staging/`, or anything else you own.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli upgrade --dry-run ~/megamaid-*
+```
+
+**Always start with `--dry-run`.** It writes nothing and prints exactly what a real run
+would do.
+
+It decides file by file, and the decision is deliberately lopsided: overwriting something
+you wrote is unrecoverable in spirit, while skipping a file only costs you an explanation.
+So a file is replaced only when it is byte-identical to a version megamaid actually shipped,
+or differs from one purely in comments or formatting. **Anything else is refused and left
+exactly as found** — reported by name, with its project, so you can decide yourself.
+
+| Flag         | What it does                                                            |
+| ------------ | ----------------------------------------------------------------------- |
+| `--dry-run`  | Report only. Writes nothing. Works with `--rollback` too.               |
+| `--rollback` | Restore each project's most recent backup and revert its version stamp. |
+| `--yes`      | Skip the confirmation prompt when more than one project is named.       |
+
+Exit codes: `0` everything converged, `1` at least one file was refused and needs you,
+`2` a project could not be read or a write actually failed.
+
+**Backups.** Before writing anything, each project's runtime is copied to
+`.megamaid-backups/<timestamp>-<version>/`, a sibling of `megamaid/`. The three most recent
+are kept and older ones are pruned; nothing else you leave in that directory is ever touched.
+To undo the most recent upgrade:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli upgrade --rollback ~/megamaid-acehardware
+```
+
+The report ends with a **Shared variants** list: files several projects changed the same
+way. That is usually template work that never made it back upstream, and it turns N project
+decisions into one backport review. Backport it here, through a PR, and the next `upgrade`
+will recognize it — a change that only ever lives on an abandoned branch is deliberately
+never trusted.
+
+Codes `MM-31`, `MM-32`, `MM-35` and `MM-36` are explained in
+`skills/megamaid/references/troubleshooting.md`.
 
 ### Something wrong?
 

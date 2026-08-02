@@ -154,8 +154,9 @@ user's current directory, not the installed plugin. After copying:
    `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and write it to
    `.megamaid-version` at the project root. This records which megamaid
    version the project was scaffolded from, so later you can see how far its
-   copied `megamaid/` runtime has drifted from the current plugin. (A project
-   with no `.megamaid-version` predates this scheme.)
+   copied `megamaid/` runtime has drifted from the current plugin — and so
+   `mm upgrade` can close that gap. (A project with no `.megamaid-version`
+   predates this scheme.) See [Upgrading an existing project](#upgrading-an-existing-project).
 4. Tell the user to run: `python -m venv .venv && source .venv/bin/activate && pip install -e . && playwright install chromium`.
 
 ### 4. Write the target class
@@ -215,6 +216,54 @@ to see what changed since last run.
 ```
 
 Reads from the latest completed run. No re-scraping.
+
+## Upgrading an existing project
+
+Scaffolding **copies** the runtime in, so every project is frozen at the
+version that made it. When the user asks to update, modernize, or "pull in the
+new megamaid" for a project they already have, do not re-scaffold — that would
+put their `targets/` code and scraped output at risk for no reason. Run:
+
+```bash
+mm upgrade --dry-run <project> [<project>…]
+```
+
+`upgrade` runs from the plugin and takes project directories as arguments; it
+is neither URL-scoped nor project-scoped, and it will refuse to run from inside
+a project because the implementation is not vendored.
+
+**Always show the user the `--dry-run` report before writing anything.** The
+report is the point: it names every file that will be refused, every file whose
+comments will be replaced, and every project that could not be read. Re-run
+without `--dry-run` to apply, adding `--yes` to skip the confirmation when more
+than one project is named.
+
+What it will and will not touch:
+
+- **Replaced** — files byte-identical to a version megamaid shipped, or
+  differing from one only in comments or formatting.
+- **Added** — runtime modules the project does not have yet.
+- **Refused** — everything else, left exactly as found and reported by name
+  under `[MM-32]`. Never talk the user out of a refusal or "fix" it by hand
+  without asking; that file is theirs, and the asymmetry is deliberate —
+  overwriting a hand edit is unrecoverable in spirit, refusing one costs an
+  explanation.
+- **Never opened** — `targets/`, `staging/`, `manifest.json`, `.venv/`,
+  `pyproject.toml`.
+
+Each project's runtime is copied to `.megamaid-backups/<timestamp>-<version>/`
+before anything is written, three deep. To undo the most recent run:
+
+```bash
+mm upgrade --rollback <project>
+```
+
+That restores the runtime *and* reverts `.megamaid-version`, so the stamp never
+claims a version the project is not running.
+
+Exit codes: `0` converged, `1` something was refused and needs a human, `2` a
+project could not be read or a write failed. `MM-31`, `MM-32`, `MM-35` and
+`MM-36` are explained in `${CLAUDE_PLUGIN_ROOT}/skills/megamaid/references/troubleshooting.md`.
 
 ## Non-Negotiables
 

@@ -523,10 +523,8 @@ def render(plans: list[ProjectPlan]) -> str:
         lines.append("")
         lines.append(f"  {len(replaced)} file(s) replaced with the current runtime")
         if cosmetic:
-            lines.append(
-                f"    {len(cosmetic)} of them differed only in comments or formatting - that"
-            )
-            lines.append("    text was replaced. The originals are in .megamaid-backups/:")
+            lines.append(f"    {len(cosmetic)} differed only in comments or formatting - that text")
+            lines.append("    was replaced. The originals are in .megamaid-backups/:")
             for plan, act in cosmetic:
                 lines.append(f"      {plan.project.name}: {act.name}")
 

@@ -4,7 +4,7 @@
 >
 > — Yogurt, probably
 
-Three examples — images, PDFs, and text — each showing what you say to Claude and what comes out the other side.
+Four examples — images, PDFs, text, and upgrading projects you already have — each showing what you say to Claude and what comes out the other side.
 
 ---
 
@@ -128,6 +128,73 @@ staging/hnrss/20260417T232911Z/
 ```
 
 Run it daily and you get a growing local archive of everything that surfaces on HN — no API key, no database, no moving parts. Just files.
+
+---
+
+## Example 4: Upgrading projects you already have
+
+**What you say to Claude:**
+
+> "I scraped a dozen sites last spring. Pull the new megamaid into all of them."
+
+**What megamaid does:**
+
+Scaffolding copies the runtime into each project, so every one of those twelve
+is frozen at whatever version built it — none of them have `netguard.py`, and
+several are missing `recon.py` entirely. Rather than re-scaffolding (which would
+put your `targets/` code and everything in `staging/` in the blast radius),
+Claude runs the converger in report-only mode first:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli upgrade --dry-run ~/megamaid-*
+```
+
+**What you get:**
+
+```
+  12 projects
+  9 converges cleanly
+  3 have divergent files - upgraded around them
+
+  4 file(s) refused - left exactly as found   [MM-32]
+    megamaid-walmart: cli.py  (diverges from every known release)
+    megamaid-walmart: images.py  (diverges from every known release)
+    megamaid-macys: images.py  (diverges from every known release)
+    megamaid-ulta: images.py  (diverges from every known release)
+    -> review by hand: keep the edit, or replace it yourself if it should
+       have been the runtime file all along.
+
+  71 file(s) replaced with the current runtime
+    3 differed only in comments or formatting - that text
+    was replaced. The originals are in .megamaid-backups/:
+      megamaid-acehardware: __init__.py
+      megamaid-amazon: discovery.py
+      megamaid-costco: __init__.py
+
+  Files added
+    netguard.py      -> 12
+    constants.py     -> 12
+    recon.py         -> 8
+
+  1 added files cannot be invoked   [MM-35]
+    megamaid-walmart: recon.py (needs cli.py)
+
+  Shared variants - candidates to backport upstream
+    images.py      2c94c206  x3   megamaid-macys megamaid-ulta megamaid-walmart
+
+  Nothing written. Re-run without --dry-run.
+```
+
+Nothing has been written yet. The four refusals are files you changed by hand —
+they will be left exactly as they are, and the rest of each project upgrades
+around them. The **Shared variants** line is the useful one: the same
+`images.py` edit in three independent projects is template work that never made
+it back upstream, so that is one PR against megamaid rather than three
+decisions.
+
+Re-run without `--dry-run` to apply. Every project's runtime is copied to
+`.megamaid-backups/` first, three deep, and `--rollback` puts the most recent
+one back.
 
 ---
 
