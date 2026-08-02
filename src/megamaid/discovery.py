@@ -62,31 +62,33 @@ async def browser_headers_client(
     warmup is the load-bearing half — the headers alone are frequently not
     enough, because the cookie is what the next request is checked against.
 
-    **Measured reachability, 2026-08-02.** Three modes, one target URL each.
-    The `browser` column is playwright-stealth under xvfb — see
-    `skills/megamaid/patterns/image_downloads.md`, which is the strongest mode
-    megamaid has and the one this module does *not* provide:
+    **Measured 2026-08-02**, four commerce sites, one target URL each. Grouped by
+    the anti-bot deployment in front of them, which is what actually determines
+    the answer — the specific site does not generalise, the vendor does. The
+    `browser` column is playwright-stealth under xvfb (see
+    `skills/megamaid/patterns/image_downloads.md`), the strongest mode megamaid
+    has and one this module does *not* provide:
 
-    ================  ====================  ==================  =================
-    site              `identify`            `browser-headers`   `browser`
-    ================  ====================  ==================  =================
-    williams-sonoma   read timeout, 2x60s   reachable, 760 KB   not needed
-    american eagle    reachable, 1045 KB    no gain             not needed
-    lululemon         read timeout, 2x60s   HTTP 400            homepage 200 [1]
-    walmart           -> /blocked           -> /blocked         homepage 200 [2]
-    ================  ====================  ==================  =================
+    ==================  ====================  =================  ================
+    front end           `identify`            `browser-headers`  `browser`
+    ==================  ====================  =================  ================
+    none                reachable, ~1 MB      no gain            not needed
+    soft rate-limiter   read timeout, 2x60s   reachable, 760 KB  not needed
+    Akamai Bot Manager  read timeout, 2x60s   rejected           cleared [1]
+    PerimeterX          -> block page         -> block page      partial [2]
+    ==================  ====================  =================  ================
 
-    [1] Full Akamai clearance (`_abck`, `ak_bmsc`, `bm_sv`, `bm_sz`). The site's
-        GraphQL endpoint answers `GE401001 Bad Request` to the query document
-        captured months ago — an application-layer rejection, not a block. The
-        bot wall is passed; the saved query needs recapturing.
-    [2] Homepage reachable at 439 KB with its real title. Browse pages still
-        redirect to a page titled "Robot or human?", so the homepage warmup no
-        longer buys catalog access the way it did when this helper was written.
+    [1] Full clearance cookie set (`_abck`, `ak_bmsc`, `bm_sv`, `bm_sz`), then
+        the site's own API answered an application-layer error to a query
+        document captured months earlier — a stale saved query, not a block.
+    [2] Homepage reachable at 439 KB; category pages still redirect to an
+        interstitial. The homepage warmup no longer buys catalog access the way
+        it did when this helper was first written.
 
-    An earlier version of this docstring claimed Walmart worked outright. Anti-bot
-    deployments move: treat this as a dated measurement, not a guarantee, and run
-    `megamaid recon` against a target rather than trusting it.
+    An earlier version of this docstring named four retailers and claimed all of
+    them worked. Anti-bot deployments move: treat this as a dated measurement of
+    vendor behaviour, not a guarantee about any site, and run `megamaid recon`
+    against a target rather than trusting a table.
 
     This mode is not a default. It identifies as a browser, so a run using it is
     recorded as such in the manifest — see `ACCESS_MODE`.
@@ -101,8 +103,8 @@ async def browser_headers_client(
 
     Example::
 
-        async with browser_headers_client("https://www.williams-sonoma.com") as client:
-            resp = await client.get("https://www.williams-sonoma.com/shop/cookware/")
+        async with browser_headers_client("https://example.com") as client:
+            resp = await client.get("https://example.com/shop/category/")
     """
     headers = {**_BROWSER_HEADERS, **(extra_headers or {})}
     async with httpx.AsyncClient(
