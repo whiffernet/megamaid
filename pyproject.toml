@@ -53,3 +53,6 @@ version = { file = ".claude-plugin/VERSION.txt" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["megamaid*", "megamaid_mcp*"]
+
+[tool.setuptools.package-data]
+megamaid_setup = ["known_hashes.json"]
