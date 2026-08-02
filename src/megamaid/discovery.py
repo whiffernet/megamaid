@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -20,6 +22,108 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
+
+#: Access mode this module provides beyond the default. Declared, not hidden:
+#: `tests/test_honest_identification.py` permits browser-shaped headers only in
+#: modules listed in its capability registry, so a new bypass cannot be added
+#: without appearing in the table users read.
+ACCESS_MODE = "browser-headers"
+
+#: A browser-shaped header set. The `Sec-Fetch-*` values are what matter: they
+#: describe a top-level navigation, which is what anti-bot systems check for when
+#: deciding whether a request came from a page load or a script.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
+@asynccontextmanager
+async def browser_headers_client(
+    base_url: str,
+    *,
+    timeout: float = 30.0,
+    extra_headers: dict | None = None,
+) -> AsyncIterator[httpx.AsyncClient]:
+    """An httpx client shaped like a browser navigation, with its session warmed.
+
+    This is the `browser-headers` access mode. It does two things the default
+    does not: sends the header set above, and fetches `base_url` first so the
+    site can set the cookies it expects a real visitor to already have. The
+    warmup is the load-bearing half — the headers alone are frequently not
+    enough, because the cookie is what the next request is checked against.
+
+    **Measured reachability, 2026-08-02.** Three modes, one target URL each.
+    The `browser` column is playwright-stealth under xvfb — see
+    `skills/megamaid/patterns/image_downloads.md`, which is the strongest mode
+    megamaid has and the one this module does *not* provide:
+
+    ================  ====================  ==================  =================
+    site              `identify`            `browser-headers`   `browser`
+    ================  ====================  ==================  =================
+    williams-sonoma   read timeout, 2x60s   reachable, 760 KB   not needed
+    american eagle    reachable, 1045 KB    no gain             not needed
+    lululemon         read timeout, 2x60s   HTTP 400            homepage 200 [1]
+    walmart           -> /blocked           -> /blocked         homepage 200 [2]
+    ================  ====================  ==================  =================
+
+    [1] Full Akamai clearance (`_abck`, `ak_bmsc`, `bm_sv`, `bm_sz`). The site's
+        GraphQL endpoint answers `GE401001 Bad Request` to the query document
+        captured months ago — an application-layer rejection, not a block. The
+        bot wall is passed; the saved query needs recapturing.
+    [2] Homepage reachable at 439 KB with its real title. Browse pages still
+        redirect to a page titled "Robot or human?", so the homepage warmup no
+        longer buys catalog access the way it did when this helper was written.
+
+    An earlier version of this docstring claimed Walmart worked outright. Anti-bot
+    deployments move: treat this as a dated measurement, not a guarantee, and run
+    `megamaid recon` against a target rather than trusting it.
+
+    This mode is not a default. It identifies as a browser, so a run using it is
+    recorded as such in the manifest — see `ACCESS_MODE`.
+
+    Args:
+        base_url: Site root, fetched once to seed session cookies.
+        timeout: Per-request timeout in seconds.
+        extra_headers: Merged over the browser defaults.
+
+    Yields:
+        A warmed `httpx.AsyncClient`.
+
+    Example::
+
+        async with browser_headers_client("https://www.williams-sonoma.com") as client:
+            resp = await client.get("https://www.williams-sonoma.com/shop/cookware/")
+    """
+    headers = {**_BROWSER_HEADERS, **(extra_headers or {})}
+    async with httpx.AsyncClient(
+        headers=headers,
+        follow_redirects=True,
+        timeout=timeout,
+    ) as client:
+        try:
+            await client.get(base_url)
+            logger.info("browser_headers_client: session warmed for %s", base_url)
+        except Exception as exc:
+            # Non-fatal: some sites serve the target fine without a seeded
+            # cookie, and failing here would remove a mode that still works.
+            logger.warning("browser_headers_client: warmup failed for %s: %s", base_url, exc)
+        yield client
+
+
+#: The pre-0.10 name. Kept so scaffolded projects written against it keep working
+#: — they hold a frozen copy of this module and `megamaid upgrade` will not
+#: replace a file the user has edited.
+stealth_http_client = browser_headers_client
 
 
 @dataclass

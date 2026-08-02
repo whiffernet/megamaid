@@ -46,6 +46,15 @@ _OFFENDER_PATTERNS = (
 #: point of `DEFAULT_USER_AGENT`'s conventional compatibility token.
 _HONEST_MARKER = "megamaid/"
 
+#: Modules permitted to send browser-shaped requests, each implementing a
+#: declared access mode. This is the point of the guard: not that megamaid
+#: cannot present as a browser, but that it cannot do so *undeclared*. A new
+#: bypass has to be added here, and anything added here has to carry an
+#: ACCESS_MODE the docs and the run manifest surface to the user.
+_CAPABILITY_MODULES = {
+    "src/megamaid/discovery.py": "browser-headers",
+}
+
 _FENCE = "```"
 
 
@@ -89,18 +98,48 @@ def test_no_spoofed_browser_identity_in_shipped_content(repo_root):
     offenders: list[str] = []
 
     for path, lineno, line in _shipped_lines(repo_root):
+        relative = path.relative_to(repo_root).as_posix()
+        if relative in _CAPABILITY_MODULES:
+            continue
         hits = [pattern for pattern in _OFFENDER_PATTERNS if pattern in line]
         if not hits or _HONEST_MARKER in line:
             continue
-        offenders.append(
-            f"{path.relative_to(repo_root)}:{lineno}: [{', '.join(hits)}] {line.strip()}"
-        )
+        offenders.append(f"{relative}:{lineno}: [{', '.join(hits)}] {line.strip()}")
 
     assert not offenders, (
-        "shipped content impersonates a browser:\n  "
+        "undeclared browser impersonation in shipped content:\n  "
         + "\n  ".join(offenders)
-        + "\n\nIdentify as megamaid instead — see non-negotiable #5 in SKILL.md."
+        + "\n\nEither identify as megamaid, or move this behind a declared access "
+        "mode and register the module in _CAPABILITY_MODULES so it reaches the "
+        "capability table and the run manifest."
     )
+
+
+def test_every_capability_module_declares_its_access_mode(repo_root):
+    """A registered module must actually export the mode it claims.
+
+    The registry is what lets browser-shaped headers through, so an entry that
+    does not correspond to a real, named mode would be a silent hole rather than
+    a declared capability.
+    """
+    import ast
+
+    for relative, mode in _CAPABILITY_MODULES.items():
+        path = repo_root / relative
+        assert path.is_file(), f"{relative} is registered as a capability module but does not exist"
+
+        declared = None
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "ACCESS_MODE" for t in node.targets
+            ):
+                declared = getattr(node.value, "value", None)
+
+        assert declared == mode, (
+            f"{relative} is registered for access mode {mode!r} but declares "
+            f"ACCESS_MODE = {declared!r}. The registry and the module must agree, "
+            "or the manifest will record the wrong thing."
+        )
 
 
 def test_the_scan_actually_reaches_shipped_content(repo_root):
