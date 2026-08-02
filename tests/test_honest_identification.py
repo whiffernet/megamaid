@@ -157,3 +157,34 @@ def test_policy_states_the_positive_requirement(repo_root):
         "requirement that the scaffold identify itself"
     )
     assert "DEFAULT_USER_AGENT" in skill
+
+
+def test_recon_does_not_need_playwright(repo_root):
+    """`megamaid recon` must run in the launcher's browser-free venv.
+
+    The launcher installs the `[cli]` extra, which has no playwright, and
+    `recon` is documented as runnable from it. Importing DEFAULT_USER_AGENT
+    through `base` — which imports playwright at module scope — made the
+    documented first step die with ModuleNotFoundError. `constants.py` exists
+    precisely so light consumers can avoid that; its own docstring says so.
+
+    Asserted by source inspection rather than by import, because pytest runs in
+    an environment that HAS playwright, so an import here would pass regardless.
+    """
+    import ast
+
+    tree = ast.parse((repo_root / "src" / "megamaid" / "cli.py").read_text())
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name != "recon":
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.ImportFrom) and inner.module == "base":
+                names = ", ".join(alias.name for alias in inner.names)
+                offenders.append(f"cli.py:{inner.lineno}: recon imports {names} from .base")
+
+    assert not offenders, (
+        "\n  ".join(offenders)
+        + "\n\n  base imports playwright at module scope; the launcher's venv has none. "
+        "Import from .constants instead."
+    )
