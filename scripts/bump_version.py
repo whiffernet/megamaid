@@ -85,11 +85,12 @@ def latest_tag() -> tuple[int, int, int] | None:
     )
     if result.returncode != 0:
         return None
-    found = []
+    found: list[tuple[int, int, int]] = []
     for line in result.stdout.split():
         match = SEMVER.match(line.lstrip("v"))
         if match:
-            found.append(tuple(int(part) for part in match.groups()))
+            major, minor, patch = (int(part) for part in match.groups())
+            found.append((major, minor, patch))
     return max(found) if found else None
 
 
