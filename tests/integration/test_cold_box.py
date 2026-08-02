@@ -182,10 +182,20 @@ def assert_within_budget(elapsed: float) -> None:
         AssertionError: when elapsed meets or exceeds the connect budget.
     """
     margin = CONNECT_BUDGET_SECONDS - elapsed
-    print(
-        f"\ncold start: {elapsed:.1f}s / {CONNECT_BUDGET_SECONDS}s gate "
+    line = (
+        f"cold start: {elapsed:.1f}s / {CONNECT_BUDGET_SECONDS}s gate "
         f"({margin:+.1f}s margin; MCP_TIMEOUT kills at 30s)"
     )
+    print(f"\n{line}")
+
+    # pytest captures stdout for passing tests, so the print above is visible
+    # only on failure — which is the case this was meant to stop relying on.
+    # The step summary renders in the Actions UI regardless of capture, and
+    # needs no pytest flag in the workflow to work.
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a") as handle:
+            handle.write(f"{line}\n")
     if elapsed >= CONNECT_BUDGET_SECONDS:
         raise AssertionError(
             f"cold start took {elapsed:.1f}s; MCP_TIMEOUT kills at 30s, gate is "
