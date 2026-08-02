@@ -22,43 +22,105 @@ sys.path.insert(0, str(SRC))
 from megamaid.constants import DEFAULT_USER_AGENT  # noqa: E402
 from megamaid.discovery import sitemap_discovery  # noqa: E402
 
-_SCANNED_DIRS = ("src", "templates")
+#: Every directory whose contents reach a user's machine. `skills/` matters most
+#: and was the original omission: the Python inside `patterns/*.md` is copied
+#: verbatim into generated projects, so it is a *larger* surface than `src/`,
+#: and a spoofed UA added there shipped with the guard staying green.
+_SCANNED_DIRS = ("src", "templates", "skills", "commands")
+
+#: Impersonation signals. `Mozilla/5.0` alone was the original check, and it
+#: caught only the symptom the deleted PerimeterX helper happened to carry —
+#: that helper's own docstring credited the bypass to the `Sec-Fetch-*` set,
+#: which the old guard did not look at. Each of these passed before:
+#: `Chrome/131.0.0.0 Safari/537.36`, a bare `AppleWebKit/537.36`, `Opera/`,
+#: and a full `Sec-Fetch-*` header set with no User-Agent at all.
+_OFFENDER_PATTERNS = (
+    "Mozilla/5.0",
+    "AppleWebKit",
+    "Safari/5",
+    "Sec-Fetch-",
+    "Opera/",
+)
+
+#: A line naming megamaid is identifying, not impersonating — that is the whole
+#: point of `DEFAULT_USER_AGENT`'s conventional compatibility token.
 _HONEST_MARKER = "megamaid/"
 
+_FENCE = "```"
 
-def _shipped_python_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
-    """Every .py file the project ships to users."""
-    files: list[pathlib.Path] = []
+
+def _shipped_lines(repo_root: pathlib.Path):
+    """Yield (path, lineno, line) for every line of shipped, executable content.
+
+    Python is scanned whole. Markdown is scanned only inside fenced code blocks:
+    `references/troubleshooting.md` legitimately *discusses* `Mozilla/5.0` in
+    prose to explain why not to use it, and flagging that would push the guard
+    toward being switched off.
+
+    Deliberately not scanned: anything that is not `.py` or `.md`. In particular
+    `src/megamaid_setup/known_hashes.json` embeds `ast.dump` output for every
+    historical runtime file, including old User-Agent literals, and is generated
+    rather than written.
+    """
     for directory in _SCANNED_DIRS:
-        files.extend(sorted((repo_root / directory).rglob("*.py")))
-    return files
+        root = repo_root / directory
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.suffix not in (".py", ".md"):
+                continue
+            markdown = path.suffix == ".md"
+            fenced = False
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                if markdown and line.lstrip().startswith(_FENCE):
+                    fenced = not fenced
+                    continue
+                if markdown and not fenced:
+                    continue
+                yield path, lineno, line
 
 
-def test_no_spoofed_browser_user_agent_in_shipped_runtime(repo_root):
-    """No shipped module may claim to be a browser it is not.
+def test_no_spoofed_browser_identity_in_shipped_content(repo_root):
+    """Nothing shipped may claim to be a browser it is not.
 
-    A line carrying `Mozilla/5.0` is allowed only when it also carries
-    `megamaid/`, i.e. it is the honest UA's compatibility token.
+    A line carrying an impersonation signal is allowed only when it also names
+    megamaid — i.e. it is the honest UA, or a command using it.
     """
     offenders: list[str] = []
-    honest_hits = 0
 
-    for path in _shipped_python_files(repo_root):
-        for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            if "Mozilla/5.0" not in line:
-                continue
-            if _HONEST_MARKER in line:
-                honest_hits += 1
-                continue
-            offenders.append(f"{path.relative_to(repo_root)}:{lineno}: {line.strip()}")
+    for path, lineno, line in _shipped_lines(repo_root):
+        hits = [pattern for pattern in _OFFENDER_PATTERNS if pattern in line]
+        if not hits or _HONEST_MARKER in line:
+            continue
+        offenders.append(
+            f"{path.relative_to(repo_root)}:{lineno}: [{', '.join(hits)}] {line.strip()}"
+        )
 
-    assert honest_hits >= 1, (
-        "the scan found no honest User-Agent anywhere — the pattern is probably "
-        "broken, which would make this test pass while checking nothing"
+    assert not offenders, (
+        "shipped content impersonates a browser:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nIdentify as megamaid instead — see non-negotiable #5 in SKILL.md."
     )
-    assert not offenders, "spoofed browser User-Agent in the shipped runtime:\n  " + "\n  ".join(
-        offenders
+
+
+def test_the_scan_actually_reaches_shipped_content(repo_root):
+    """Vacuity canary.
+
+    Anchored on the scan reaching files, not on any literal appearing in them.
+    The previous version asserted a `Mozilla/5.0` hit existed somewhere, which
+    made the most honest possible follow-up — dropping the compatibility token
+    from `DEFAULT_USER_AGENT` — fail with "the pattern is probably broken".
+    """
+    scanned = {path for path, _, _ in _shipped_lines(repo_root)}
+    assert DEFAULT_USER_AGENT.strip(), "DEFAULT_USER_AGENT is empty"
+    assert _HONEST_MARKER in DEFAULT_USER_AGENT, (
+        f"DEFAULT_USER_AGENT is {DEFAULT_USER_AGENT!r}, which does not name megamaid"
     )
+    for directory in _SCANNED_DIRS:
+        assert any(directory in str(path.relative_to(repo_root)) for path in scanned), (
+            f"the scan reached no file under {directory}/ — it would pass while "
+            "checking nothing there"
+        )
 
 
 def test_sitemap_discovery_sends_the_honest_user_agent(monkeypatch):

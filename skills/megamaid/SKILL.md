@@ -175,9 +175,11 @@ Defaults:
 
 - `rate_limit_seconds = 2.0` for small/independent sites, `1.0` for
   large commercial sites with obvious bot tolerance.
-- Default User-Agent from `${CLAUDE_PLUGIN_ROOT}/src/megamaid/constants.py`
-  (identifies as megamaid with a URL — don't spoof a real browser unless the
-  user says so).
+- Default User-Agent from `${CLAUDE_PLUGIN_ROOT}/src/megamaid/constants.py`,
+  which names megamaid and links the repo. Do not substitute a browser string.
+  Non-negotiable #5 makes honest identification a property of the scaffold, not
+  a default to be talked out of — what a user later does in their own project is
+  theirs to decide, but you do not generate it that way.
 
 ### 5. Dry-run on 3–5 items
 
@@ -258,7 +260,7 @@ before anything is written, three deep. To undo the most recent run:
 mm upgrade --rollback <project>
 ```
 
-That restores the runtime *and* reverts `.megamaid-version`, so the stamp never
+That restores the runtime _and_ reverts `.megamaid-version`, so the stamp never
 claims a version the project is not running.
 
 Exit codes: `0` converged, `1` something was refused and needs a human, `2` a
