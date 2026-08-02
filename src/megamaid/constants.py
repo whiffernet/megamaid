@@ -9,5 +9,5 @@ here lands in the MCP server's dependency closure.
 from __future__ import annotations
 
 DEFAULT_USER_AGENT = (
-    "megamaid/0.10 (+https://github.com/whiffernet/megamaid) Mozilla/5.0 (compatible; Chromium/131)"
+    "megamaid/0.11 (+https://github.com/whiffernet/megamaid) Mozilla/5.0 (compatible; Chromium/131)"
 )

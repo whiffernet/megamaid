@@ -57,15 +57,36 @@ staging/<target>/<run_id>/
 └── manifest.json  # run state, identity hashes, delta detection
 ```
 
-## Non-negotiables
+## Access modes
 
 > _"Evil will always triumph because good is dumb."_ — Dark Helmet.
 >
-> Prove him wrong. Scrape politely.
+> Prove him wrong. Be capable, and say what you did.
 
-- Honors `robots.txt` by default. `--ignore-robots` is opt-in.
+Sites vary in what they'll serve a script. megamaid has three modes, and picks the
+weakest one that works — the point is reaching the content, and being able to say
+afterwards how you reached it.
+
+| mode                     | what it sends                                                              | reaches                                                                                                                                |
+| ------------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `identify` **(default)** | `DEFAULT_USER_AGENT` — names megamaid, links this repo                     | most sites, including plenty that a browser string would get you blocked from                                                          |
+| `browser-headers`        | browser-shaped headers + a homepage fetch to seed cookies                  | sites that reject script-shaped requests but don't fingerprint                                                                         |
+| `browser`                | real Chromium via Playwright, optionally `playwright-stealth` under `xvfb` | JS-gated content, and TLS/fingerprint-checking CDNs — see [`skills/megamaid/patterns/image_downloads.md`](skills/megamaid/patterns/image_downloads.md) |
+
+Every mode is **declared, not hidden**. A module that sends browser-shaped requests
+registers as a capability, exports its `ACCESS_MODE`, and the run records which mode
+it used — so a scraped archive tells you months later how it was collected. A test
+enforces this: browser-shaped headers outside a declared module fail the build.
+
+Start at `identify` and escalate only when a target actually refuses you. `megamaid
+recon` reports which mode a site needs.
+
+**Always on, regardless of mode:**
+
+- Honors `robots.txt` by default. `--ignore-robots` is opt-in and recorded.
 - Default rate limit >= 1 second. 2 seconds for small/independent sites.
-- No CAPTCHA bypass. No proxy rotation. No fingerprint evasion baked in.
+- No CAPTCHA solving, no proxy or IP rotation. Both exist to defeat a limit a site
+  has already expressed; neither is a capability megamaid is trying to have.
 - No scraping behind auth without user-provided credentials.
 
 ## Compared to other free scrapers
@@ -232,7 +253,7 @@ which leaves nothing on screen but "Failed to connect".
 The server is a normal console script, so any MCP client can spawn it over stdio:
 
 ```bash
-pipx install "git+https://github.com/whiffernet/megamaid@v0.10.0#egg=megamaid[mcp]"
+pipx install "git+https://github.com/whiffernet/megamaid@v0.11.0#egg=megamaid[mcp]"
 megamaid-mcp
 ```
 

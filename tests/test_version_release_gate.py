@@ -25,10 +25,27 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERSION_FILE = ROOT / ".claude-plugin" / "VERSION.txt"
 
-#: What pip installs, plus the files deciding how. A change under any of these
-#: reaches users and therefore obliges a version bump. Docs, tests, CI config
-#: and the plan/spec workspace deliberately do not.
-SHIPPED = ("src/", "scripts/", "pyproject.toml", ".claude-plugin/")
+#: Everything that reaches a user's machine, and therefore obliges a version
+#: bump — because Claude Code caches plugins in a version-keyed directory, so
+#: content that changes without the version moving is content nobody receives.
+#:
+#: Not only what pip installs: `skills/` and `commands/` are plugin components
+#: read straight from the cache directory, and `templates/` is copied into every
+#: scaffolded project. Omitting those three was a real hole — a playbook fix
+#: would have shipped to nobody, silently, which is issue #26's exact shape.
+SHIPPED = (
+    "src/",
+    "scripts/",
+    "skills/",
+    "commands/",
+    "templates/",
+    "pyproject.toml",
+    ".claude-plugin/",
+)
+
+#: Top-level entries that deliberately never require a bump: they are not part
+#: of what a user installs.
+_NOT_SHIPPED = {"tests", "docs", "assets", ".github", ".superpowers", ".review"}
 
 # Leading zeros rejected — setuptools normalizes 0.10.01 to 0.10.1, so the
 # declared version and the installed one would silently disagree.
@@ -126,4 +143,23 @@ def test_shipped_changes_since_the_last_release_carry_a_bump(declared, latest_ta
         "Releasing this would leave every installed user on the old code, "
         "because the plugin cache and the venv stamp both key on the version. "
         "Fix with: python3 scripts/bump_version.py --patch  (or --minor/--major)"
+    )
+
+
+def test_shipped_covers_every_top_level_directory():
+    """A new top-level directory must be classified, not silently unbumped.
+
+    `skills/`, `commands/` and `templates/` were all missing from SHIPPED at
+    first: each reaches users, so a change to any of them would have released
+    invisibly. Nothing made that visible, so this asserts the classification is
+    total — a new directory fails here until someone decides which side it is on.
+    """
+    tracked_dirs = {line.split("/", 1)[0] for line in git("ls-files").splitlines() if "/" in line}
+    shipped_dirs = {entry.rstrip("/") for entry in SHIPPED if entry.endswith("/")}
+    unclassified = tracked_dirs - shipped_dirs - _NOT_SHIPPED
+
+    assert not unclassified, (
+        f"top-level {sorted(unclassified)} is tracked but classified neither shipped "
+        "nor exempt. If users receive it, add it to SHIPPED so changes require a "
+        "version bump; if not, add it to _NOT_SHIPPED."
     )

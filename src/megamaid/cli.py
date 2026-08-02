@@ -172,7 +172,11 @@ def recon(
     API endpoints with 3-6 HTTP requests. Outputs a pattern recommendation
     with confidence level.
     """
-    from .base import DEFAULT_USER_AGENT
+    # From .constants, not .base: base imports playwright at module scope, and
+    # the launcher's venv installs the [cli] extra without it. Reaching through
+    # base made `megamaid recon` — the documented first step, and the one command
+    # most likely to be run from the launcher — die on ModuleNotFoundError.
+    from .constants import DEFAULT_USER_AGENT
     from .recon import format_json_report, format_text_report, run_recon
 
     ua = user_agent or DEFAULT_USER_AGENT

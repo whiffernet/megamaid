@@ -22,9 +22,14 @@ you sink an hour into scaffolding that won't work.
 3. **Fetch one representative page.**
 
    ```bash
-   curl -sL -A "Mozilla/5.0" https://<domain>/some/item | head -200
+   curl -sL -A "megamaid/recon (+https://github.com/whiffernet/megamaid)" https://<domain>/some/item | head -200
    ```
 
+   Recon with the same honesty the scaffold uses, for two reasons. A bare
+   `Mozilla/5.0` is the single worst choice — `troubleshooting.md` notes that
+   sites block generic Mozilla strings while some whitelist megamaid's. And
+   probing as a browser tells you how the site treats a browser, which is not
+   what your scraper will be: recon that lies is recon you cannot act on.
    - If the HTML contains your target content: a static-HTML pattern is
      _viable_ — but don't commit to it yet. Scrapeable HTML is a local
      optimum; step 4 still applies and an API usually beats it.
