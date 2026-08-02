@@ -6,11 +6,16 @@ cuts `v$(cat .claude-plugin/VERSION.txt)` at merge rather than incrementing
 whatever tag it finds. That inversion is what makes drift impossible — a tag
 can no longer advance without the tree advancing with it.
 
-Two files must agree, and this script is the only thing that should edit them:
+Three files record the version, and this script is the only thing that should
+edit them. Each is checked by `tests/test_version_release_gate.py`:
 
     .claude-plugin/VERSION.txt   read by setuptools (pyproject `dynamic`),
                                  so it becomes `importlib.metadata.version`
     .claude-plugin/plugin.json   read by Claude Code and by `launch.py`
+    README.md                    the pinned pipx install line
+
+Every replacement is computed and validated before anything is written, so a
+failure cannot leave them disagreeing — which is the drift this exists to stop.
 
 Usage:
     python3 scripts/bump_version.py --patch
@@ -31,6 +36,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERSION_FILE = ROOT / ".claude-plugin" / "VERSION.txt"
 PLUGIN_FILE = ROOT / ".claude-plugin" / "plugin.json"
+README_FILE = ROOT / "README.md"
 
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
@@ -94,26 +100,64 @@ def latest_tag() -> tuple[int, int, int] | None:
     return max(found) if found else None
 
 
+def _patched_plugin(new: str) -> str:
+    """plugin.json with its version key set to `new`.
+
+    Patched as text rather than via `json.dump`: dumping would reformat the
+    whole manifest — indentation, key order, unicode escaping — and bury a
+    one-line version change in an unreviewable diff.
+
+    Raises:
+        SystemExit: when the key is missing, ambiguous, or the wrong one matched.
+    """
+    original = PLUGIN_FILE.read_text()
+    # Anchored to the top-level key's exact two-space indent so a nested
+    # "version" inside, say, an mcpServers block cannot be the one rewritten.
+    patched, count = re.subn(
+        r'^(  "version"\s*:\s*")[^"]*(")', rf"\g<1>{new}\g<2>", original, count=1, flags=re.M
+    )
+    if count != 1:
+        raise SystemExit(f"  x found {count} top-level version keys in {PLUGIN_FILE.name}, want 1")
+    if json.loads(patched)["version"] != new:
+        raise SystemExit(f"  x patching {PLUGIN_FILE.name} would not have set version to {new}")
+    return patched
+
+
+def _patched_readme(new: str) -> str:
+    """README with every pinned install tag set to `new`.
+
+    The gate asserts this pin tracks VERSION.txt, so a bump that skipped it
+    would turn the build red on every release — the tool would be prescribing
+    its own failure.
+
+    Raises:
+        SystemExit: when no pin is found, so a silent no-op cannot pass for success.
+    """
+    original = README_FILE.read_text()
+    patched, count = re.subn(r"(megamaid@v)\d+\.\d+\.\d+(#egg=)", rf"\g<1>{new}\g<2>", original)
+    if count < 1:
+        raise SystemExit(f"  x no megamaid@v<version>#egg= pin found in {README_FILE.name}")
+    return patched
+
+
 def write(new: str) -> None:
-    """Write `new` to both files, preserving plugin.json's key order.
+    """Set `new` in every file that records the version.
+
+    Every replacement is computed and validated before anything is written. A
+    partial write is the exact drift this script exists to prevent: an earlier
+    version bumped VERSION.txt first, so a failure patching plugin.json left the
+    two disagreeing.
 
     Args:
         new: the version to write.
     """
-    VERSION_FILE.write_text(new + "\n")
-
-    # Rewritten as text, not via json.dump: dumping would reformat the whole
-    # manifest (indentation, key order, unicode escaping) and bury a one-line
-    # version change in an unreviewable diff.
-    original = PLUGIN_FILE.read_text()
-    patched, count = re.subn(r'("version"\s*:\s*")[^"]+(")', rf"\g<1>{new}\g<2>", original, count=1)
-    if count != 1:
-        raise SystemExit(f"  x found {count} version keys in {PLUGIN_FILE.name}, expected 1")
-    PLUGIN_FILE.write_text(patched)
-
-    # Cheap guard against a regex that matched the wrong key.
-    if json.loads(patched)["version"] != new:
-        raise SystemExit(f"  x {PLUGIN_FILE.name} did not end up at {new}")
+    staged = {
+        VERSION_FILE: new + "\n",
+        PLUGIN_FILE: _patched_plugin(new),
+        README_FILE: _patched_readme(new),
+    }
+    for path, content in staged.items():
+        path.write_text(content)
 
 
 def main(argv: list[str]) -> int:
@@ -135,6 +179,7 @@ def main(argv: list[str]) -> int:
 
     if args.set:
         new = args.set.strip()
+        parse(new)  # rejects non-semver with a message rather than a TypeError below
         if parse(new) <= baseline:
             raise SystemExit(f"  x {new} does not advance on {'.'.join(str(p) for p in baseline)}")
     else:
@@ -142,7 +187,8 @@ def main(argv: list[str]) -> int:
         new = bump(baseline, level)
 
     write(new)
-    print(f"  ok {current.strip()} -> {new}  ({VERSION_FILE.name}, {PLUGIN_FILE.name})")
+    touched = ", ".join(f.name for f in (VERSION_FILE, PLUGIN_FILE, README_FILE))
+    print(f"  ok {current} -> {new}  ({touched})")
     return 0
 
 

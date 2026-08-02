@@ -31,5 +31,6 @@ def test_version_txt_mirrors_plugin_json(repo_root):
     manifest = json.loads((repo_root / ".claude-plugin" / "plugin.json").read_text())
     mirror = (repo_root / ".claude-plugin" / "VERSION.txt").read_text().strip()
     assert mirror == manifest["version"], (
-        f"VERSION.txt ({mirror}) disagrees with plugin.json ({manifest['version']})"
+        f"VERSION.txt ({mirror}) disagrees with plugin.json ({manifest['version']}). "
+        "Fix with: python3 scripts/bump_version.py --set <version>"
     )

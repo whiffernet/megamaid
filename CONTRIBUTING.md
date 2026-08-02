@@ -12,11 +12,12 @@ Bump inside your PR, before merge:
 python3 scripts/bump_version.py --patch   # or --minor / --major / --set 1.2.3
 ```
 
-That writes both `.claude-plugin/VERSION.txt` and `.claude-plugin/plugin.json`, which must
-always agree. It bumps from whichever is higher — the file or the newest tag — so a file that
+That writes all three places the version is recorded — `.claude-plugin/VERSION.txt`,
+`.claude-plugin/plugin.json`, and the README's pinned install line — validating every
+replacement before writing any, so a failure cannot leave them disagreeing. It bumps from whichever is higher — the file or the newest tag — so a file that
 has fallen behind cannot regenerate a version that was already released.
 
-Three tests in `tests/test_version_release_gate.py` enforce this and name the fix in their
+The tests in `tests/test_version_release_gate.py` enforce this and name the fix in their
 failure messages. They run in CI's `test` job, which checks out at `fetch-depth: 0` so tags
 are visible.
 

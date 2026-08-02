@@ -105,10 +105,17 @@ def _log(message: str) -> None:
     print(line, file=sys.stderr)
 
 
-#: Everything pip copies out of the plugin root, for fingerprinting purposes.
-#: `packages.find` ships `src/`; the other two decide what gets installed and
-#: under what version, so a change to either invalidates the venv too.
-_FINGERPRINTED = ("pyproject.toml", ".claude-plugin/VERSION.txt")
+#: Non-.py files pip copies out of the plugin root, for fingerprinting.
+#: `packages.find` ships `src/**/*.py`; these are the rest — declared
+#: package-data, plus the two files deciding what gets installed and under what
+#: version. known_hashes.json is regenerated on its own in `chore:` commits that
+#: touch no .py file at all, so leaving it out would let a stale manifest ride
+#: into a venv that believed itself current.
+_FINGERPRINTED = (
+    "pyproject.toml",
+    ".claude-plugin/VERSION.txt",
+    "src/megamaid_setup/known_hashes.json",
+)
 
 
 def source_fingerprint(root: pathlib.Path) -> str:

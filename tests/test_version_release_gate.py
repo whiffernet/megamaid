@@ -16,7 +16,6 @@ can see tags. They are the only thing standing between a code change and a
 release that silently never reaches anyone.
 """
 
-import json
 import pathlib
 import re
 import subprocess
@@ -25,7 +24,6 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERSION_FILE = ROOT / ".claude-plugin" / "VERSION.txt"
-PLUGIN_FILE = ROOT / ".claude-plugin" / "plugin.json"
 
 #: What pip installs, plus the files deciding how. A change under any of these
 #: reaches users and therefore obliges a version bump. Docs, tests, CI config
@@ -46,7 +44,11 @@ def git(*args):
     result = subprocess.run(
         ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False
     )
-    return result.stdout.strip() if result.returncode == 0 else ""
+    if result.returncode != 0:
+        # Returning "" would make a broken git call look like "no tags" or "no
+        # files changed", so the gate would pass precisely when it cannot see.
+        pytest.fail(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
 
 
 @pytest.fixture(scope="module")
@@ -61,16 +63,6 @@ def latest_tag():
     tags = [semver(line) for line in git("tag", "--list", "v*").splitlines()]
     found = sorted(tag for tag in tags if tag)
     return found[-1] if found else None
-
-
-def test_version_txt_and_plugin_json_agree(declared):
-    """One version, written twice — they must not drift apart."""
-    manifest = json.loads(PLUGIN_FILE.read_text())["version"]
-    assert manifest == declared, (
-        f"plugin.json says {manifest}, VERSION.txt says {declared}. "
-        "Both are read at runtime and must match. "
-        "Fix with: python3 scripts/bump_version.py --set <version>"
-    )
 
 
 def test_declared_version_is_parseable(declared):
