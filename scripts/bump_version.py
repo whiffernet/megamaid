@@ -12,6 +12,8 @@ edit them. Each is checked by `tests/test_version_release_gate.py`:
     .claude-plugin/VERSION.txt   read by setuptools (pyproject `dynamic`),
                                  so it becomes `importlib.metadata.version`
     .claude-plugin/plugin.json   read by Claude Code and by `launch.py`
+                                 (its agreement with VERSION.txt is checked
+                                 by tests/test_manifests.py)
     README.md                    the pinned pipx install line
 
 Every replacement is computed and validated before anything is written, so a
@@ -38,7 +40,10 @@ VERSION_FILE = ROOT / ".claude-plugin" / "VERSION.txt"
 PLUGIN_FILE = ROOT / ".claude-plugin" / "plugin.json"
 README_FILE = ROOT / "README.md"
 
-SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+# Leading zeros are rejected: setuptools normalizes "0.10.01" to PEP 440
+# "0.10.1", so plugin.json would say 0.10.01 while importlib.metadata said
+# 0.10.1 — issue #26 all over again, from a single typo.
+SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
 def parse(text: str) -> tuple[int, int, int]:

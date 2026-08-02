@@ -30,7 +30,9 @@ VERSION_FILE = ROOT / ".claude-plugin" / "VERSION.txt"
 #: and the plan/spec workspace deliberately do not.
 SHIPPED = ("src/", "scripts/", "pyproject.toml", ".claude-plugin/")
 
-SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+# Leading zeros rejected — setuptools normalizes 0.10.01 to 0.10.1, so the
+# declared version and the installed one would silently disagree.
+SEMVER = re.compile(r"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
 def semver(text):
