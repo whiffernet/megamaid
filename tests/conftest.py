@@ -21,7 +21,7 @@ def repo_root() -> pathlib.Path:
 # prose mentions unflagged: "the megamaid skill" and "megamaid is a scraper"
 # both have the same shape as a command line ("megamaid" + whitespace + word),
 # but "skill" and "is" are not subcommands, so neither ever matches.
-_MEGAMAID_SUBCOMMANDS = ("recon", "suck", "status", "diff", "export", "map", "init")
+_MEGAMAID_SUBCOMMANDS = ("recon", "suck", "status", "diff", "export", "map", "init", "upgrade")
 _COMMAND = r"\bmegamaid\b\s+(?:" + "|".join(_MEGAMAID_SUBCOMMANDS) + r")\b"
 
 # Command position: start of line, optionally after a shell prompt marker,
