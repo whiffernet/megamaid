@@ -187,7 +187,10 @@ VERSION_STAMP = ".megamaid-version"
 #: directory matching this may be restored or pruned; everything else belongs
 #: to the user. `back_up()` validates against the same pattern before writing,
 #: so a backup that exists can always be found again.
-_BACKUP_NAME = re.compile(r"^\d{8}-\d{6}-.+$")
+#: `\Z`, not `$`: `$` also matches before a trailing newline, which would let a
+#: directory named "20260101-000000-1.0\n" qualify for restore and for deletion
+#: by the retention prune. Unknown entries are the user's, not ours.
+_BACKUP_NAME = re.compile(r"^\d{8}-\d{6}-.+\Z")
 
 
 def parse_backup_name(name: str) -> tuple[str, str]:

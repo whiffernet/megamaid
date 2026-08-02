@@ -305,6 +305,9 @@ def _strays(root: pathlib.Path) -> None:
     partial = root / "zzz-tmp-partial"
     partial.mkdir()
     (partial / "half-copied.py").write_text("# a copytree that died on a full disk\n")
+    # Correctly shaped right up to a trailing newline — the case a `$`-anchored
+    # pattern would wave through into both restore and the retention prune.
+    (root / "20990101-000000-9.9.9\n").mkdir()
 
 
 def test_latest_backup_ignores_stray_entries(tmp_path):
