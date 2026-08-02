@@ -162,9 +162,19 @@ def _handshake(repo_root, state, extra_args=(), extra_requests=()):
 def assert_within_budget(elapsed: float) -> None:
     """The lane's timing gate, extracted so it can itself be tested.
 
+    Prints the margin on every run, pass or fail. Reporting only on failure hides
+    the trend: a run at 19.9s and a run at 4s both look like a green tick, so the
+    budget can erode to nothing without anyone seeing it coming, and the first
+    symptom is an intermittent red that reads as a flake.
+
     Raises:
         AssertionError: when elapsed meets or exceeds the connect budget.
     """
+    margin = CONNECT_BUDGET_SECONDS - elapsed
+    print(
+        f"\ncold start: {elapsed:.1f}s / {CONNECT_BUDGET_SECONDS}s gate "
+        f"({margin:+.1f}s margin; MCP_TIMEOUT kills at 30s)"
+    )
     if elapsed >= CONNECT_BUDGET_SECONDS:
         raise AssertionError(
             f"cold start took {elapsed:.1f}s; MCP_TIMEOUT kills at 30s, gate is "
