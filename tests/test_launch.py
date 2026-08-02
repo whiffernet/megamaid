@@ -11,6 +11,7 @@ import pytest
 STDLIB_OK = {
     "__future__",
     "argparse",
+    "hashlib",
     "json",
     "os",
     "pathlib",
@@ -103,12 +104,73 @@ def test_ensure_venv_skips_work_when_current(repo_root, tmp_path):
     mod = _load(repo_root)
     venv = tmp_path / "venv"
     (venv / "bin").mkdir(parents=True)
-    (venv / ".plugin-version").write_text("0.9.0\n")
+    (venv / ".plugin-version").write_text(mod.venv_stamp(repo_root, "0.9.0") + "\n")
     calls = []
     mod.ensure_venv(
         repo_root, venv, "0.9.0", runner=lambda *a, **k: calls.append(a), log=lambda m: None
     )
     assert calls == [], "a current venv must not be rebuilt"
+
+
+def _plugin_tree(root, *, body="x = 1\n", name="mod.py"):
+    """A minimal plugin layout for fingerprinting."""
+    (root / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "pkg" / name).write_text(body)
+    (root / "pyproject.toml").write_text("[project]\nname='p'\n")
+    return root
+
+
+def test_fingerprint_is_stable_across_calls(repo_root, tmp_path):
+    mod = _load(repo_root)
+    root = _plugin_tree(tmp_path / "plugin")
+    assert mod.source_fingerprint(root) == mod.source_fingerprint(root)
+
+
+def test_fingerprint_changes_when_shipped_source_changes(repo_root, tmp_path):
+    mod = _load(repo_root)
+    root = _plugin_tree(tmp_path / "plugin")
+    before = mod.source_fingerprint(root)
+    (root / "src" / "pkg" / "mod.py").write_text("x = 2\n")
+    assert mod.source_fingerprint(root) != before
+
+
+def test_fingerprint_changes_when_a_module_is_renamed(repo_root, tmp_path):
+    """Content alone is not enough — the path is hashed too."""
+    mod = _load(repo_root)
+    root = _plugin_tree(tmp_path / "plugin")
+    before = mod.source_fingerprint(root)
+    (root / "src" / "pkg" / "mod.py").rename(root / "src" / "pkg" / "renamed.py")
+    assert mod.source_fingerprint(root) != before
+
+
+def test_venv_is_stale_when_source_changed_under_an_unchanged_version(repo_root, tmp_path):
+    """Issue #26 exactly: same version string, different code.
+
+    v0.9.0 through v0.9.4 all reported `0.9.0`, so a version-only stamp matched
+    forever and the venv — a non-editable copy — was never rebuilt. Users who
+    ran `claude plugin update` kept running the code they already had.
+    """
+    mod = _load(repo_root)
+    root = _plugin_tree(tmp_path / "plugin")
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / ".plugin-version").write_text(mod.venv_stamp(root, "0.9.0") + "\n")
+    assert mod.venv_is_current(venv, mod.venv_stamp(root, "0.9.0")) is True
+
+    (root / "src" / "pkg" / "mod.py").write_text("x = 999  # a new release\n")
+    assert mod.venv_is_current(venv, mod.venv_stamp(root, "0.9.0")) is False, (
+        "a venv built from different source must rebuild even when the version string did not move"
+    )
+
+
+def test_a_bare_version_stamp_from_before_the_fix_forces_one_rebuild(repo_root, tmp_path):
+    """Existing installs carry `0.9.0`; they must not be mistaken for current."""
+    mod = _load(repo_root)
+    root = _plugin_tree(tmp_path / "plugin")
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / ".plugin-version").write_text("0.9.0\n")
+    assert mod.venv_is_current(venv, mod.venv_stamp(root, "0.9.0")) is False
 
 
 def test_ensure_venv_stamps_only_after_successful_install(repo_root, tmp_path):

@@ -121,8 +121,9 @@ That is the whole install. It registers the skill, the `/megamaid-doctor` comman
 
 On the MCP server's first start, a small virtualenv is built under
 `~/.local/state/megamaid/` (9–14 seconds depending on pip cache warmth; roughly 70 packages,
-no browser download). It is stamped with the plugin version, so `claude plugin update megamaid`
-refreshes it automatically on the next start.
+no browser download). It is stamped with the plugin version _and a digest of the installed
+source_, so `claude plugin update megamaid` refreshes it automatically on the next start —
+including when a release ships without the version moving.
 
 ### Running megamaid commands
 
@@ -217,7 +218,7 @@ which leaves nothing on screen but "Failed to connect".
 The server is a normal console script, so any MCP client can spawn it over stdio:
 
 ```bash
-pipx install "git+https://github.com/whiffernet/megamaid@v0.9.0#egg=megamaid[mcp]"
+pipx install "git+https://github.com/whiffernet/megamaid@v0.10.0#egg=megamaid[mcp]"
 megamaid-mcp
 ```
 
