@@ -7,6 +7,7 @@ still passes on any other machine.
 
 import os
 import pathlib
+import shutil
 import sys
 
 import pytest
@@ -15,7 +16,12 @@ SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC))
 
 from megamaid_setup.manifest import load_manifest  # noqa: E402
-from megamaid_setup.upgrade import plan_project  # noqa: E402
+from megamaid_setup.upgrade import (  # noqa: E402
+    BACKUP_DIR,
+    apply_plan,
+    plan_project,
+    rollback,
+)
 
 RUNTIME = SRC / "megamaid"
 FLEET = sorted(pathlib.Path(os.environ.get("MEGAMAID_FLEET", "/home/e")).glob("megamaid-*"))
@@ -99,3 +105,41 @@ def test_every_planned_name_is_a_real_runtime_file(plans):
             "started reading outside src/megamaid/, or the runtime itself changed without "
             "this test's independent glob picking it up"
         )
+
+
+def test_rollback_on_a_real_project_survives_a_stray_backup_directory(tmp_path):
+    """The silent-empty case, on a copy of a real scaffolded project.
+
+    Found this way rather than on a synthetic fixture, and it needed to be:
+    the bug is in `latest_backup()`'s directory listing, and it only bites once
+    a project has a genuine backup for a stray entry to sort *after*. A
+    `.megamaid-backups/` holding a partial copytree — what a `back_up()` that
+    died on a full disk leaves behind — used to be chosen as "the most recent
+    backup", after which rollback deleted the runtime and restored the partial
+    directory over it. Exit 0, "restored", and 11 real modules gone.
+
+    The copy is of `megamaid/` only (the runtime is the whole subject here);
+    the real project is never written to.
+    """
+    source = next((p for p in FLEET if (p / "megamaid").is_dir()), None)
+    assert source is not None, "fleet fixture is vacuous"
+
+    proj = tmp_path / source.name
+    shutil.copytree(
+        source / "megamaid", proj / "megamaid", ignore=shutil.ignore_patterns("__pycache__")
+    )
+    pristine = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert len(pristine) >= 5, f"expected a real runtime, got {sorted(pristine)}"
+
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.2", "20260802-120000")
+
+    partial = proj / BACKUP_DIR / "zzz-tmp-partial"
+    partial.mkdir()
+    (partial / "half-copied.py").write_text("# a copytree that died on a full disk\n")
+
+    rollback(proj)
+
+    assert {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")} == pristine, (
+        "rollback restored the stray directory instead of the real backup"
+    )

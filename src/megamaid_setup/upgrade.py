@@ -16,7 +16,9 @@ import ast
 import collections
 import enum
 import hashlib
+import os
 import pathlib
+import re
 import shutil
 from dataclasses import dataclass, field
 
@@ -163,6 +165,76 @@ BACKUP_DIR = ".megamaid-backups"
 #: How many previous runtimes to keep per project.
 RETAIN = 3
 
+#: Exactly the names `back_up()` produces: `YYYYMMDD-HHMMSS-<version>`.
+#: `.megamaid-backups/` is a plain directory in the user's project, so anything
+#: can be sitting in it — a note, an editor swapfile, a tarball parked there on
+#: purpose, or a partial copytree left behind by a back_up() that died. Only a
+#: directory matching this may be restored or pruned; everything else belongs
+#: to the user. `back_up()` validates against the same pattern before writing,
+#: so a backup that exists can always be found again.
+_BACKUP_NAME = re.compile(r"^\d{8}-\d{6}-.+$")
+
+
+def parse_backup_name(name: str) -> tuple[str, str]:
+    """Split a backup directory's basename back into (timestamp, version).
+
+    Names are `<now>-<version>`, where `now` is the fixed-width
+    `YYYYMMDD-HHMMSS` (15 characters) `back_up()` always produces. Splitting
+    at that fixed offset — rather than on the first or last `-` — is what
+    keeps this correct when `version` itself contains a `-` (a prerelease
+    tag like `1.0.0-rc1`), which is also why `back_up()` puts the timestamp
+    first in the name at all.
+
+    This is presentation only (used to describe a backup in a report), never
+    load-bearing for a read or write — deciding *which* entries are backups at
+    all is `_is_backup()`'s job, against a stricter pattern than this one.
+
+    Args:
+        name: a backup directory's basename, as produced by `back_up()`.
+
+    Returns:
+        (timestamp, version). If `name` doesn't have a `-` at the expected
+        fixed offset — a name from some other source — returns (name, "")
+        rather than raising.
+    """
+    if len(name) > 16 and name[15] == "-":
+        return name[:15], name[16:]
+    return name, ""
+
+
+def _is_backup(path: pathlib.Path) -> bool:
+    """True only for an entry `back_up()` itself could have produced.
+
+    Symlinks are excluded even when correctly named: following one would let
+    a restore read from outside the project, and let the retention prune
+    delete whatever it points at.
+    """
+    return bool(_BACKUP_NAME.match(path.name)) and path.is_dir() and not path.is_symlink()
+
+
+def backups(project: pathlib.Path) -> list[pathlib.Path]:
+    """Every real backup this project has, oldest first.
+
+    The single place `.megamaid-backups/` is turned into a list of things that
+    may be restored or deleted — shared by `latest_backup()` and `back_up()`'s
+    retention prune so the two can never disagree about what counts.
+
+    Ordering is a plain lexicographic sort of the directory names, which is
+    chronological because `back_up()` names them `<now>-<version>` — timestamp
+    first. See `back_up()`.
+
+    Args:
+        project: the project directory.
+
+    Returns:
+        Backup directories in chronological order; empty when there is no
+        `.megamaid-backups/`, or nothing in it that this tool wrote.
+    """
+    root = project / BACKUP_DIR
+    if not root.is_dir():
+        return []
+    return sorted((p for p in root.iterdir() if _is_backup(p)), key=lambda p: p.name)
+
 
 class BackupFailed(Exception):
     """`apply_plan` could not even finish making its safety copy.
@@ -199,13 +271,26 @@ def back_up(project: pathlib.Path, version: str, now: str) -> pathlib.Path:
 
     Returns:
         The directory the copy was written to.
+
+    Raises:
+        ValueError: if `now` is not `YYYYMMDD-HHMMSS`. The name would not be
+            recognised as a backup afterwards, so the copy would exist on disk
+            and be impossible to restore — a silent failure, caught here at
+            creation instead.
     """
+    dest_name = f"{now}-{version}"
+    if not _BACKUP_NAME.match(dest_name):
+        raise ValueError(
+            f"refusing to write a backup named {dest_name!r}: `now` must be YYYYMMDD-HHMMSS "
+            "and `version` must be non-empty, or the backup could never be found again"
+        )
+
     root = project / BACKUP_DIR
     root.mkdir(exist_ok=True)
-    dest = root / f"{now}-{version}"
+    dest = root / dest_name
     shutil.copytree(project / "megamaid", dest, ignore=shutil.ignore_patterns("__pycache__"))
 
-    for stale in sorted(root.iterdir())[:-RETAIN]:
+    for stale in backups(project)[:-RETAIN]:
         shutil.rmtree(stale)
     return dest
 
@@ -254,51 +339,27 @@ def latest_backup(project: pathlib.Path) -> pathlib.Path | None:
     shared by `rollback()` itself and by anything that only needs to preview
     what a rollback would do (e.g. `upgrade --dry-run --rollback`).
 
-    "Most recent" is determined by lexicographic sort of the backup directory
-    names, which is chronological because `back_up()` names them
-    `<now>-<version>` — timestamp first. See `back_up()`.
-
     Args:
         project: the project directory.
 
     Returns:
-        The newest backup directory, or None when `.megamaid-backups` does
-        not exist or is empty.
+        The newest backup directory (see `backups()` for what counts as one),
+        or None when there is nothing this tool wrote to restore.
     """
-    root = project / BACKUP_DIR
-    backups = sorted(root.iterdir()) if root.is_dir() else []
-    return backups[-1] if backups else None
-
-
-def parse_backup_name(name: str) -> tuple[str, str]:
-    """Split a backup directory's basename back into (timestamp, version).
-
-    Names are `<now>-<version>`, where `now` is the fixed-width
-    `YYYYMMDD-HHMMSS` (15 characters) `back_up()` always produces. Splitting
-    at that fixed offset — rather than on the first or last `-` — is what
-    keeps this correct when `version` itself contains a `-` (a prerelease
-    tag like `1.0.0-rc1`), which is also why `back_up()` puts the timestamp
-    first in the name at all.
-
-    This is presentation only (used to describe a backup in a report), never
-    load-bearing for a read or write — `back_up()`/`rollback()` never parse
-    the name apart, only sort it as a whole string.
-
-    Args:
-        name: a backup directory's basename, as produced by `back_up()`.
-
-    Returns:
-        (timestamp, version). If `name` doesn't have a `-` at the expected
-        fixed offset — a name from some other source — returns (name, "")
-        rather than raising.
-    """
-    if len(name) > 16 and name[15] == "-":
-        return name[:15], name[16:]
-    return name, ""
+    found = backups(project)
+    return found[-1] if found else None
 
 
 def rollback(project: pathlib.Path) -> pathlib.Path:
-    """Restore the most recent backup.
+    """Restore the most recent backup, atomically.
+
+    The replacement runtime is built beside `megamaid/` first and swapped in
+    with `os.replace`, rather than deleting `megamaid/` and copying over the
+    hole it leaves. Delete-then-copy has no safe failure point: anything that
+    goes wrong between the two — an unreadable backup, a full disk — leaves
+    the project with no runtime at all, which is the one outcome rollback
+    exists to prevent. Staged-then-swapped, a restore either happens or does
+    not, and a failure leaves the project exactly as it was found.
 
     Args:
         project: the project directory.
@@ -313,8 +374,34 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
     if newest is None:
         raise RuntimeError(f"MM-36 no backup found in {project / BACKUP_DIR}")
 
-    shutil.rmtree(project / "megamaid")
-    shutil.copytree(newest, project / "megamaid")
+    vendored = project / "megamaid"
+    staged = project / f".megamaid-restoring.{os.getpid()}"
+    retired = project / f".megamaid-replaced.{os.getpid()}"
+    for scratch in (staged, retired):
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    # Stage. Everything that can go wrong goes wrong here, with megamaid/
+    # still untouched. __pycache__ is excluded because a backup written before
+    # back_up() started excluding it may still carry one.
+    try:
+        shutil.copytree(newest, staged, ignore=shutil.ignore_patterns("__pycache__"))
+    except Exception:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+
+    # Swap. Two renames on the same filesystem; megamaid/ is the old tree or
+    # the restored one at every instant, never a partial mix of the two.
+    try:
+        if vendored.exists():
+            os.replace(vendored, retired)
+        os.replace(staged, vendored)
+    except Exception:
+        if retired.exists() and not vendored.exists():
+            os.replace(retired, vendored)
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+
+    shutil.rmtree(retired, ignore_errors=True)
     return newest
 
 

@@ -16,6 +16,7 @@ from megamaid_setup.upgrade import (  # noqa: E402
     BackupFailed,
     apply_plan,
     back_up,
+    backups,
     latest_backup,
     parse_backup_name,
     plan_project,
@@ -280,3 +281,200 @@ def test_apply_plan_does_not_wrap_a_copy_loop_failure_as_backup_failed(tmp_path,
     assert {p.name for p in backups[0].glob("*.py")} == {
         p.name for p in (proj / "megamaid").glob("*.py")
     }
+
+
+# --- backup-directory hygiene: only a real backup may be restored ---------
+#
+# `.megamaid-backups/` is a plain directory in the user's project. Anything can
+# land in it: a note, an editor swapfile, a tarball parked there on purpose, or
+# a partial copytree left behind by a back_up() that died on a full disk. An
+# unfiltered `sorted(root.iterdir())` treats every one of those as a backup.
+# The stray *directory* case is the dangerous one — it restores cleanly, exit 0,
+# and leaves the project with an empty runtime.
+
+
+def _strays(root: pathlib.Path) -> None:
+    """Drop one of every kind of non-backup entry into a backups directory.
+
+    Every name sorts after a `YYYYMMDD-HHMMSS-<version>` timestamp, so an
+    unfiltered sort picks one of these as "most recent".
+    """
+    (root / "zzz-NOTES.txt").write_text("remember to backport images.py\n")
+    (root / "zzz-archive.tar.gz").write_bytes(b"\x1f\x8b")
+    partial = root / "zzz-tmp-partial"
+    partial.mkdir()
+    (partial / "half-copied.py").write_text("# a copytree that died on a full disk\n")
+
+
+def test_latest_backup_ignores_stray_entries(tmp_path):
+    """A note, a tarball and a half-written directory are not backups."""
+    proj = _project(tmp_path)
+    real = back_up(proj, "0.9.1", "20260101-000000")
+    _strays(proj / BACKUP_DIR)
+
+    assert latest_backup(proj) == real
+
+
+def test_latest_backup_is_none_when_only_strays_are_present(tmp_path):
+    """No backup at all is MM-36, which rollback() reports and recovers from.
+    Picking a stray instead is what turns "nothing to restore" into data loss."""
+    proj = _project(tmp_path)
+    (proj / BACKUP_DIR).mkdir()
+    _strays(proj / BACKUP_DIR)
+
+    assert latest_backup(proj) is None
+
+
+def test_latest_backup_ignores_a_symlink_pointing_at_a_backup(tmp_path):
+    """A symlink named like a backup would make rollback follow a path out of
+    the project entirely, and retention prune it as though it owned the target."""
+    proj = _project(tmp_path)
+    real = back_up(proj, "0.9.1", "20260101-000000")
+    (proj / BACKUP_DIR / "20260601-000000-9.9.9").symlink_to(real)
+
+    assert latest_backup(proj) == real
+
+
+def test_rollback_leaves_the_runtime_intact_when_a_stray_directory_sorts_last(tmp_path):
+    """The silent case. `sorted(iterdir())[-1]` picks the stray directory,
+    rmtree deletes the runtime, copytree restores an empty tree, and the
+    command reports success. Reproduced on a copy of megamaid-amazon: 17
+    runtime files before, 1 after, exit 0, "restored"."""
+    proj = _project(tmp_path)
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+    before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert before, "fixture is vacuous — no runtime files to lose"
+
+    _strays(proj / BACKUP_DIR)
+    rollback(proj)
+
+    after = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert after, "the runtime was silently emptied"
+    assert "half-copied.py" not in {p.name for p in (proj / "megamaid").glob("*")}
+
+
+def test_rollback_leaves_the_runtime_intact_when_a_stray_file_sorts_last(tmp_path):
+    """The loud variant: NotADirectoryError out of copytree, *after* rmtree has
+    already deleted megamaid/. Reproduced on a copy of megamaid-allrecipes,
+    which was left with no megamaid/ directory at all."""
+    proj = _project(tmp_path)
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+
+    (proj / BACKUP_DIR / "zzz-NOTES.txt").write_text("not a backup\n")
+    rollback(proj)
+
+    assert (proj / "megamaid").is_dir()
+    assert {p.name for p in (proj / "megamaid").glob("*.py")}
+
+
+def test_retention_prune_survives_a_stray_file_in_the_backups_directory(tmp_path):
+    """Same unfiltered listing, in back_up()'s prune: a stray file landing in
+    the `[:-RETAIN]` slice raises NotADirectoryError out of shutil.rmtree."""
+    proj = _project(tmp_path)
+    (proj / BACKUP_DIR).mkdir()
+    (proj / BACKUP_DIR / "000-earliest-note.txt").write_text("sorts first\n")
+
+    for i in range(RETAIN + 2):
+        back_up(proj, "0.9.1", f"2026080{i}-000000")
+
+    assert len(backups(proj)) == RETAIN
+
+
+def test_retention_prune_never_deletes_a_users_stray_entry(tmp_path):
+    """`.megamaid-backups/` is the user's directory. Pruning is scoped to the
+    backups this tool made; anything else a user parked there is not ours to
+    delete."""
+    proj = _project(tmp_path)
+    (proj / BACKUP_DIR).mkdir()
+    keepsake = proj / BACKUP_DIR / "000-earliest-note.txt"
+    keepsake.write_text("sorts first, must survive\n")
+
+    for i in range(RETAIN + 2):
+        back_up(proj, "0.9.1", f"2026080{i}-000000")
+
+    assert keepsake.is_file(), "pruning deleted a file the user put there"
+
+
+# --- rollback() atomicity: never leave the project with no runtime ---------
+
+
+def test_rollback_leaves_the_runtime_untouched_when_the_restore_fails(tmp_path):
+    """rmtree-then-copytree means any failure between the two leaves the
+    project with no runtime at all. Staging the replacement first and swapping
+    it in means a failed restore is a no-op, not a deletion."""
+    proj = _project(tmp_path)
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+    before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+
+    def _raise(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(shutil, "copytree", _raise)
+        with pytest.raises(OSError):
+            rollback(proj)
+
+    after = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert after == before, "a failed rollback destroyed the runtime it could not replace"
+
+
+def test_a_failed_rollback_leaves_no_scratch_directories_behind(tmp_path):
+    """Staging happens beside megamaid/, in the project. A failure must not
+    leave the user staring at a half-restored directory they have to identify
+    and clean up themselves."""
+    proj = _project(tmp_path)
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+    expected = {p.name for p in proj.iterdir()}
+
+    def _raise(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(shutil, "copytree", _raise)
+        with pytest.raises(OSError):
+            rollback(proj)
+
+    assert {p.name for p in proj.iterdir()} == expected
+
+
+def test_rollback_does_not_restore_pycache_into_the_runtime(tmp_path):
+    """back_up() excludes __pycache__; restoring must not smuggle one back in
+    from a backup written before that exclusion existed."""
+    proj = _project(tmp_path)
+    dest = back_up(proj, "0.9.1", "20260802-000000")
+    (dest / "__pycache__").mkdir()
+    (dest / "__pycache__" / "stale.pyc").write_bytes(b"\x00")
+
+    rollback(proj)
+
+    assert not (proj / "megamaid" / "__pycache__").exists()
+
+
+# --- back_up() names what latest_backup() can find -------------------------
+
+
+def test_back_up_refuses_a_timestamp_it_could_never_find_again(tmp_path):
+    """The two halves of the naming contract must not drift apart: a backup
+    written under a name latest_backup() filters out is a backup that exists on
+    disk and can never be restored. Fail at creation instead."""
+    proj = _project(tmp_path)
+    with pytest.raises(ValueError, match="YYYYMMDD-HHMMSS"):
+        back_up(proj, "0.9.1", "not-a-timestamp")
+
+
+def test_apply_plan_reports_a_bad_timestamp_as_a_backup_phase_failure(tmp_path):
+    """...and it must arrive as BackupFailed, so the CLI tells the user
+    nothing in megamaid/ was touched — which is true, since the rejection
+    happens before any copy."""
+    proj = _project(tmp_path)
+    before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    plan = plan_project(proj, RUNTIME, load_manifest())
+
+    with pytest.raises(BackupFailed):
+        apply_plan(plan, RUNTIME, "0.9.1", "not-a-timestamp")
+
+    assert {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")} == before
