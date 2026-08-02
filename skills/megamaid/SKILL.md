@@ -32,8 +32,9 @@ Invoke when the user asks to:
 Do **not** invoke for:
 
 - One-shot "just fetch this URL and tell me what it says" — use `WebFetch`
-- Scraping that requires defeating CAPTCHAs, rotating proxies, or evading
-  bot detection — say no, explain why, and stop
+- Scraping that needs CAPTCHA-solving services or proxy/IP rotation — those
+  defeat a limit the site has already expressed, and megamaid does not carry
+  them. Bot-detection heuristics are different: escalate access mode (step 2)
 - Scraping a site whose `robots.txt` forbids it unless the user has
   explicit written permission (and has said so)
 
@@ -282,13 +283,27 @@ These are not suggestions.
    traffic, it's telling you to stop. Point the user to
    `patterns/auth_wall.md` for the manual-solve + `storage_state.json`
    pattern (legitimate) and decline the rest.
-5. **No proxy rotation, no IP spoofing, no fingerprint evasion** baked
-   into the scaffold. Stealth plugins are mentioned in
-   `references/troubleshooting.md` as an opt-in the user wires up
-   themselves. **The scaffold identifies itself.** Every request the
-   scaffold makes on your behalf carries `DEFAULT_USER_AGENT`, which
-   names megamaid and links this repo. A target that blocks an honest
-   User-Agent is telling you it does not want to be scraped.
+5. **Escalate access modes deliberately, and declare which one you used.**
+   The scaffold defaults to `identify` — every request carries
+   `DEFAULT_USER_AGENT`, naming megamaid and linking the repo. Plenty of
+   sites serve that happily, and some prefer it to an obvious fake.
+
+   When a target refuses it, escalate rather than give up:
+   `browser-headers` (`discovery.browser_headers_client`) sends
+   browser-shaped headers with a homepage warmup; `browser`
+   (playwright-stealth under xvfb, see `patterns/image_downloads.md`) is
+   the strongest mode and the one that clears fingerprinting CDNs. Pick
+   the weakest mode that reaches the content.
+
+   What stays fixed is disclosure, not capability. A module sending
+   browser-shaped requests exports an `ACCESS_MODE` and is registered in
+   the capability table — `${CLAUDE_PLUGIN_ROOT}/tests/test_honest_identification.py` fails the
+   build on browser-shaped headers that are _undeclared_. Never write a
+   bypass inline in a target class to avoid that.
+
+   Two things remain out of scope because they defeat a limit rather than
+   a heuristic: **no CAPTCHA solving services, and no proxy or IP
+   rotation.**
 
 ## Directory Reference
 

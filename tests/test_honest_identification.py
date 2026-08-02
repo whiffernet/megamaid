@@ -1,14 +1,17 @@
-"""The shipped scaffold identifies itself; it does not impersonate a browser.
+"""Browser impersonation must be declared, never incidental.
 
-megamaid shipped a spoofed Chrome User-Agent as `sitemap_discovery`'s default —
-the function behind `sitemap_crawl`, the skill's first-preference pattern —
-while SKILL.md and references/troubleshooting.md both forbade exactly that in
-the scaffold. Prohibition in prose did not prevent the drift, so it is enforced
-here.
+megamaid once shipped a spoofed Chrome User-Agent as `sitemap_discovery`'s
+default — the function behind the skill's first-preference pattern — while the
+docs forbade exactly that. The fix deleted the capability, which cost a mode
+that measurably still works and did not stop anyone re-adding one inline later.
 
-The one legitimate `Mozilla/5.0` in the codebase is inside DEFAULT_USER_AGENT,
-where it is a conventional compatibility token preceded by megamaid's own name
-and repo URL. That is identification, not impersonation.
+So the rule enforced here is not "never present as a browser". It is: present as
+a browser only from a module that declares an `ACCESS_MODE` and is registered in
+`_CAPABILITY_MODULES`, so every such mode reaches the capability table users read
+and the manifest a run writes. Undeclared impersonation fails the build.
+
+`DEFAULT_USER_AGENT` remains the default and carries a conventional `Mozilla/5.0`
+compatibility token after megamaid's own name and URL. That is identification.
 """
 
 import pathlib
@@ -185,17 +188,20 @@ def test_sitemap_discovery_sends_the_honest_user_agent(monkeypatch):
     assert "megamaid/" in seen["user_agent"]
 
 
-def test_policy_states_the_positive_requirement(repo_root):
-    """The non-negotiable must say what the scaffold DOES, not only what it must not.
+def test_policy_states_what_the_scaffold_does(repo_root):
+    """The policy must describe behaviour, not only forbid things.
 
-    Phrased purely as prohibition, a spoofed default violated no stated rule.
+    Phrased purely as prohibition it failed twice, in both directions: a spoofed
+    default violated no stated rule, and later the same framing made a genuine
+    capability look like a violation to be deleted. What it has to pin down is
+    the default, the escalation path, and the duty to declare which was used.
     """
     skill = (repo_root / "skills" / "megamaid" / "SKILL.md").read_text()
-    assert "The scaffold identifies itself." in skill, (
-        "non-negotiable #5 states only prohibitions; it needs a positive "
-        "requirement that the scaffold identify itself"
-    )
-    assert "DEFAULT_USER_AGENT" in skill
+    for required in ("DEFAULT_USER_AGENT", "ACCESS_MODE", "browser-headers"):
+        assert required in skill, (
+            f"SKILL.md never mentions {required}; the access-mode policy needs to "
+            "name the default, the escalation path, and the declaration requirement"
+        )
 
 
 def test_recon_does_not_need_playwright(repo_root):
