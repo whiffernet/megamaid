@@ -647,6 +647,33 @@ def _recovery_command(project: Path) -> str:
     )
 
 
+#: 128 + SIGINT, the conventional shell status for a Ctrl-C.
+INTERRUPTED_EXIT = 130
+
+
+def _mixed_state_message(project: Path, headline: str) -> str:
+    """The warning shown when `megamaid/` may be half-upgraded.
+
+    Shared by the crash and the Ctrl-C paths so the two can never drift: an
+    interrupt leaves exactly the same state a raised exception does, and it
+    arrives at the moment the user is least inclined to go looking for the
+    recovery command.
+
+    Args:
+        project: the project that was being written when it stopped.
+        headline: what stopped it, for the first line.
+
+    Returns:
+        The full multi-line message, recovery command included.
+    """
+    return (
+        f"  x {project.name}: {headline}\n"
+        f"     megamaid/ may be left in a mixed state — some files upgraded,\n"
+        f"     some not. This does not self-heal. Recover with:\n"
+        f"       {_recovery_command(project)}"
+    )
+
+
 def _exit_code(plans: list[ProjectPlan], failures: list[Path]) -> int:
     """Map a batch of plans, plus any apply-time failures, to a process exit code.
 
@@ -818,17 +845,29 @@ def upgrade(projects: tuple[Path, ...], dry_run: bool, do_rollback: bool, yes: b
                 f"     Nothing in megamaid/ was modified. Fix the underlying\n"
                 f"     problem (e.g. free disk space) and re-run upgrade."
             )
+            if isinstance(exc.__cause__, KeyboardInterrupt):
+                # Ctrl-C during the backup. Nothing was written, so the message
+                # above is the whole truth and --rollback is still the wrong
+                # advice — but the user asked to stop, so stop.
+                raise SystemExit(INTERRUPTED_EXIT)
             failures.append(plan.project)
+        except KeyboardInterrupt:
+            # Only reachable from the copy loop: apply_plan converts an
+            # interrupt during the backup into BackupFailed above. So the
+            # backup is complete and megamaid/ is genuinely mid-write — the
+            # one moment the recovery command has to be in front of the user,
+            # rather than a bare traceback.
+            click.echo(_mixed_state_message(plan.project, "interrupted after the backup completed"))
+            raise SystemExit(INTERRUPTED_EXIT)
         except Exception as exc:
             # The backup completed (apply_plan calls it first and only
             # reaches the copy loop after it returns), so megamaid/ may now
             # be a mix of upgraded and pre-upgrade files, and a good,
             # complete backup genuinely exists to restore from.
             click.echo(
-                f"  x {plan.project.name}: apply failed after the backup completed ({exc})\n"
-                f"     megamaid/ may be left in a mixed state — some files upgraded,\n"
-                f"     some not. This does not self-heal. Recover with:\n"
-                f"       {_recovery_command(plan.project)}"
+                _mixed_state_message(
+                    plan.project, f"apply failed after the backup completed ({exc})"
+                )
             )
             failures.append(plan.project)
 

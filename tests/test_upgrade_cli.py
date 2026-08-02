@@ -23,7 +23,7 @@ from click.testing import CliRunner
 SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC))
 
-from megamaid.cli import _sanitize_backup_component, cli  # noqa: E402
+from megamaid.cli import INTERRUPTED_EXIT, _sanitize_backup_component, cli  # noqa: E402
 
 RUNTIME = SRC / "megamaid"
 
@@ -493,3 +493,101 @@ def test_sanitize_backup_component_rejects_path_escapes(bad):
 @pytest.mark.parametrize("good", ["0.9.1", "1.0.0-rc1", "20260801-130000", "deadbeef1234"])
 def test_sanitize_backup_component_passes_safe_values(good):
     assert _sanitize_backup_component(good, "version") == good
+
+
+# --- Ctrl-C mid-apply: an interrupt is not a traceback ---------------------
+#
+# KeyboardInterrupt is a BaseException, so `except Exception` never saw it: an
+# interrupt escaped the handler and the user got a bare traceback at the exact
+# moment their runtime was half-written and they most needed the --rollback
+# line. Which of the two messages is correct depends on which side of back_up()
+# the interrupt landed on, and both directions are asserted here.
+
+
+def test_interrupt_in_the_copy_loop_prints_the_recovery_command(tmp_path, monkeypatch):
+    """Past back_up(): megamaid/ is genuinely mid-write and a complete backup
+    exists, so the user gets the same guidance a crash would give them."""
+    proj = _mixed_project(tmp_path)
+
+    real_copy2 = shutil.copy2
+    calls = {"n": 0}
+
+    def _interrupt_on_second(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real_copy2(src, dst, *a, **kw)
+
+    monkeypatch.setattr(shutil, "copy2", _interrupt_on_second)
+    result = _run(["upgrade", str(proj)])
+    monkeypatch.undo()
+
+    assert "Traceback" not in result.output, result.output
+    assert "interrupted after the backup completed" in result.output
+    assert "may be left in a mixed state" in result.output
+    assert result.exit_code == INTERRUPTED_EXIT, result.output
+
+
+def test_the_recovery_command_printed_on_an_interrupt_actually_works(tmp_path, monkeypatch):
+    """Same standard the crash path is held to: the line is executed, not
+    merely inspected."""
+    proj = _mixed_project(tmp_path)
+    before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+
+    real_copy2 = shutil.copy2
+    calls = {"n": 0}
+
+    def _interrupt_on_second(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real_copy2(src, dst, *a, **kw)
+
+    monkeypatch.setattr(shutil, "copy2", _interrupt_on_second)
+    result = _run(["upgrade", str(proj)])
+    monkeypatch.undo()
+
+    _, *arguments = shlex.split(_printed_recovery_command(result.output))
+    assert _run(arguments).exit_code == 0
+
+    after = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert after == before
+
+
+def test_interrupt_during_the_backup_says_nothing_was_modified(tmp_path, monkeypatch):
+    """Before the copy loop: nothing in megamaid/ has been touched, and the
+    backup itself may be a half-written copytree. Pointing this user at
+    --rollback would restore a partial tree over an intact one."""
+    proj = _project(tmp_path)
+    before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+
+    def _interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(shutil, "copytree", _interrupt)
+    result = _run(["upgrade", str(proj)])
+    monkeypatch.undo()
+
+    assert "Traceback" not in result.output, result.output
+    assert "Nothing in megamaid/ was modified" in result.output
+    assert "--rollback" not in result.output
+    assert result.exit_code == INTERRUPTED_EXIT, result.output
+
+    after = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert after == before
+
+
+def test_an_interrupt_stops_the_run_instead_of_moving_to_the_next_project(tmp_path, monkeypatch):
+    """Ctrl-C means stop. A crash on project A is a reason to carry on to B;
+    an interrupt is an instruction not to."""
+    a, b = _project(tmp_path, "a"), _project(tmp_path, "b")
+
+    def _interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(shutil, "copytree", _interrupt)
+    result = _run(["upgrade", "--yes", str(a), str(b)])
+    monkeypatch.undo()
+
+    assert result.exit_code == INTERRUPTED_EXIT, result.output
+    assert not (b / ".megamaid-backups").exists(), "the second project was still processed"

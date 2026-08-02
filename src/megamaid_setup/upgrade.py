@@ -192,6 +192,36 @@ VERSION_STAMP = ".megamaid-version"
 #: by the retention prune. Unknown entries are the user's, not ours.
 _BACKUP_NAME = re.compile(r"^\d{8}-\d{6}-.+\Z")
 
+#: Prefixes `rollback()` stages under, as siblings of `megamaid/`.
+_SCRATCH_PREFIXES = (".megamaid-restoring.", ".megamaid-replaced.")
+
+
+def sweep_scratch(project: pathlib.Path) -> list[pathlib.Path]:
+    """Remove staging directories a previous rollback could not clean up.
+
+    `rollback()` removes its own scratch on every path it can reach, but a
+    process killed between staging and the swap — SIGKILL, a power cut — leaves
+    one behind. A tool whose whole premise is not leaving a mess in someone's
+    project should not quietly accumulate `.megamaid-restoring.<pid>`
+    directories in it.
+
+    Every scratch is swept, not only this process's: two rollbacks of the same
+    project at once are already unsafe (both mutate `megamaid/`), so this
+    introduces no hazard that concurrency did not already have.
+
+    Args:
+        project: the project directory.
+
+    Returns:
+        The directories removed, oldest name first.
+    """
+    removed = []
+    for entry in sorted(project.glob(".megamaid-*")):
+        if entry.name.startswith(_SCRATCH_PREFIXES) and entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry, ignore_errors=True)
+            removed.append(entry)
+    return removed
+
 
 def parse_backup_name(name: str) -> tuple[str, str]:
     """Split a backup directory's basename back into (timestamp, version).
@@ -347,10 +377,19 @@ def apply_plan(plan: ProjectPlan, runtime: pathlib.Path, version: str, now: str)
     if plan.error:
         raise ValueError(plan.error)
 
+    sweep_scratch(plan.project)
+
     try:
         backup = back_up(plan.project, version, now)
-    except Exception as exc:
-        raise BackupFailed(str(exc)) from exc
+    except (Exception, KeyboardInterrupt) as exc:
+        # KeyboardInterrupt is caught here, not left to propagate, because the
+        # caller's whole "was anything touched?" answer depends on which side
+        # of back_up() the failure landed on. A Ctrl-C during the backup has
+        # touched nothing in megamaid/ and must not be reported as the mixed
+        # state an interrupt in the copy loop below leaves. The original is
+        # kept as __cause__ so the caller can still tell an interrupt from a
+        # full disk and exit accordingly.
+        raise BackupFailed(str(exc) or type(exc).__name__) from exc
 
     for act in plan.actions:
         if act.action == "refuse":
@@ -409,10 +448,9 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
         raise RuntimeError(f"MM-36 no backup found in {project / BACKUP_DIR}")
 
     vendored = project / "megamaid"
-    staged = project / f".megamaid-restoring.{os.getpid()}"
-    retired = project / f".megamaid-replaced.{os.getpid()}"
-    for scratch in (staged, retired):
-        shutil.rmtree(scratch, ignore_errors=True)
+    staged = project / f"{_SCRATCH_PREFIXES[0]}{os.getpid()}"
+    retired = project / f"{_SCRATCH_PREFIXES[1]}{os.getpid()}"
+    sweep_scratch(project)
 
     # Stage. Everything that can go wrong goes wrong here, with megamaid/
     # still untouched. VERSION_STAMP is excluded because it belongs at the
@@ -431,7 +469,13 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
             os.replace(vendored, retired)
         os.replace(staged, vendored)
     except Exception:
-        if retired.exists() and not vendored.exists():
+        # Put the original back if it has already been moved aside. If even
+        # that fails, `retired` stays on disk: it is then the only copy of the
+        # project's previous runtime, and deleting it to tidy up would be the
+        # exact loss this function exists to prevent. sweep_scratch() will not
+        # touch it either, because the next run reaches it only after this one
+        # has been dealt with by hand.
+        if retired.is_dir() and not vendored.exists():
             os.replace(retired, vendored)
         shutil.rmtree(staged, ignore_errors=True)
         raise

@@ -22,6 +22,7 @@ from megamaid_setup.upgrade import (  # noqa: E402
     parse_backup_name,
     plan_project,
     rollback,
+    sweep_scratch,
 )
 
 RUNTIME = SRC / "megamaid"
@@ -534,3 +535,97 @@ def test_apply_plan_reports_a_bad_timestamp_as_a_backup_phase_failure(tmp_path):
         apply_plan(plan, RUNTIME, "0.9.1", "not-a-timestamp")
 
     assert {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")} == before
+
+
+# --- scratch directories: do not leave litter in someone's project ---------
+#
+# rollback() stages into `.megamaid-restoring.<pid>` beside megamaid/ and
+# removes it on every path it can reach — but a process killed between staging
+# and the swap (SIGKILL, a power cut) cannot reach any of them. A feature whose
+# whole premise is not leaving a mess in a user's project should not
+# accumulate those.
+
+
+def _orphans(proj: pathlib.Path) -> list[pathlib.Path]:
+    """Scratch directories a killed rollback would have left behind."""
+    made = []
+    for name in (".megamaid-restoring.99999", ".megamaid-replaced.99998"):
+        d = proj / name
+        d.mkdir()
+        (d / "base.py").write_text("# half-staged\n")
+        made.append(d)
+    return made
+
+
+def test_sweep_removes_orphaned_scratch_directories(tmp_path):
+    proj = _project(tmp_path)
+    made = _orphans(proj)
+
+    removed = sweep_scratch(proj)
+
+    assert sorted(removed) == sorted(made)
+    assert not any(d.exists() for d in made)
+
+
+def test_sweep_leaves_everything_else_in_the_project_alone(tmp_path):
+    """The sweep runs against the project root, where the user's own files
+    live — including two dot-entries this tool owns and must not delete."""
+    proj = _project(tmp_path)
+    back_up(proj, "0.9.1", "20260101-000000")
+    (proj / VERSION_STAMP).write_text("0.9.1\n")
+    (proj / ".megamaid-notes.txt").write_text("mine\n")
+    (proj / ".env").write_text("SECRET=1\n")
+    before = {p.name for p in proj.iterdir()}
+
+    assert sweep_scratch(proj) == []
+
+    assert {p.name for p in proj.iterdir()} == before
+    assert (proj / BACKUP_DIR).is_dir()
+    assert (proj / VERSION_STAMP).is_file()
+
+
+def test_rollback_sweeps_scratch_left_by_a_killed_predecessor(tmp_path):
+    """The next run collects what the killed one could not."""
+    proj = _project(tmp_path)
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+    made = _orphans(proj)
+
+    rollback(proj)
+
+    assert not any(d.exists() for d in made)
+
+
+def test_apply_sweeps_scratch_left_by_a_killed_predecessor(tmp_path):
+    """A user who never rolls back again would otherwise keep the litter
+    forever, so an ordinary upgrade collects it too."""
+    proj = _project(tmp_path)
+    made = _orphans(proj)
+
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+
+    assert not any(d.exists() for d in made)
+
+
+def test_a_successful_rollback_leaves_no_scratch_of_its_own(tmp_path):
+    proj = _project(tmp_path)
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+
+    rollback(proj)
+
+    leftovers = [p.name for p in proj.iterdir() if p.name.startswith(".megamaid-re")]
+    assert not leftovers, f"rollback left {leftovers} behind"
+
+
+def test_scratch_is_not_swept_into_a_backup(tmp_path):
+    """back_up() copies megamaid/ only, and the sweep runs before it — a
+    stale scratch must never end up inside a backup and then be restored."""
+    proj = _project(tmp_path)
+    _orphans(proj)
+
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    dest = apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+
+    assert not any(p.name.startswith(".megamaid-re") for p in dest.rglob("*"))
