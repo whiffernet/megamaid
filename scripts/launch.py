@@ -20,6 +20,7 @@ logged before slow work starts so /megamaid-doctor can explain a killed run.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -104,12 +105,65 @@ def _log(message: str) -> None:
     print(line, file=sys.stderr)
 
 
-def venv_is_current(venv_path: pathlib.Path, version: str) -> bool:
-    """True when the venv exists and was built for this plugin version."""
+#: Everything pip copies out of the plugin root, for fingerprinting purposes.
+#: `packages.find` ships `src/`; the other two decide what gets installed and
+#: under what version, so a change to either invalidates the venv too.
+_FINGERPRINTED = ("pyproject.toml", ".claude-plugin/VERSION.txt")
+
+
+def source_fingerprint(root: pathlib.Path) -> str:
+    """A digest of the source pip would install from `root`.
+
+    Args:
+        root: the plugin install directory.
+
+    Returns:
+        A short hex digest, stable across machines and checkout order.
+    """
+    paths = sorted((root / "src").rglob("*.py")) if (root / "src").is_dir() else []
+    paths += [root / name for name in _FINGERPRINTED if (root / name).is_file()]
+
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        # Hash the name as well as the bytes: without it, renaming a module or
+        # deleting one whose content is duplicated elsewhere leaves the digest
+        # unchanged.
+        digest.update(path.relative_to(root).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def venv_stamp(root: pathlib.Path, version: str) -> str:
+    """What `.plugin-version` should contain for this plugin checkout.
+
+    Keyed on a source digest as well as the version, because keying on the
+    version alone assumes the version always advances with the code — and when
+    it did not, `claude plugin update` silently left every user running the code
+    they already had. v0.9.0 through v0.9.4 all reported `0.9.0`, so the stamp
+    matched forever and the venv, which holds a non-editable copy, was never
+    rebuilt. See issue #26.
+
+    Args:
+        root: the plugin install directory.
+        version: the version read from the plugin manifest.
+
+    Returns:
+        The stamp line, e.g. "0.10.0 3f2a1c9e8b7d6a54".
+    """
+    return f"{version} {source_fingerprint(root)}"
+
+
+def venv_is_current(venv_path: pathlib.Path, stamp_value: str) -> bool:
+    """True when the venv exists and was built from exactly this source.
+
+    Args:
+        venv_path: the state venv.
+        stamp_value: what `venv_stamp` says the stamp should be.
+    """
     stamp = venv_path / ".plugin-version"
     if not (venv_path / "bin").is_dir() or not stamp.is_file():
         return False
-    return stamp.read_text().strip() == version
+    return stamp.read_text().strip() == stamp_value
 
 
 def _is_executable(path: pathlib.Path) -> bool:
@@ -165,10 +219,11 @@ def ensure_venv(
         LaunchError: MM-12 on venv creation failure, MM-13 on pip failure,
             MM-16 when pip exits 0 but a required console script is missing.
     """
-    if venv_is_current(venv_path, version):
+    stamp_value = venv_stamp(root, version)
+    if venv_is_current(venv_path, stamp_value):
         return venv_path / "bin"
 
-    log(f"build start  version={version}  venv={venv_path}")
+    log(f"build start  stamp={stamp_value}  venv={venv_path}")
     try:
         venv.EnvBuilder(with_pip=True, clear=True).create(venv_path)
     except Exception as exc:  # surfaced with a stable code
@@ -210,8 +265,8 @@ def ensure_venv(
 
     # Stamp LAST. A stamp written before a successful, verified install would
     # make a broken venv look current forever.
-    (venv_path / ".plugin-version").write_text(version + "\n")
-    log(f"build ok     version={version}")
+    (venv_path / ".plugin-version").write_text(stamp_value + "\n")
+    log(f"build ok     stamp={stamp_value}")
     return venv_path / "bin"
 
 
