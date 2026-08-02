@@ -16,6 +16,7 @@ import ast
 import enum
 import hashlib
 import pathlib
+import shutil
 from dataclasses import dataclass, field
 
 from .manifest import Manifest
@@ -144,3 +145,89 @@ def plan_project(project: pathlib.Path, runtime: pathlib.Path, manifest: Manifes
         )
     plan.actions = resolved
     return plan
+
+
+#: Sibling of megamaid/, never inside it — see back_up().
+BACKUP_DIR = ".megamaid-backups"
+
+#: How many previous runtimes to keep per project.
+RETAIN = 3
+
+
+def back_up(project: pathlib.Path, version: str, now: str) -> pathlib.Path:
+    """Copy the project's vendored runtime aside, then prune old backups.
+
+    The destination is `<project>/.megamaid-backups/<version>-<now>/`, a sibling
+    of `megamaid/`. Writing it inside `megamaid/` would mean the next backup
+    swept up the previous one, and rollback would delete the directory it was
+    about to read from.
+
+    Args:
+        project: the project directory.
+        version: the runtime version being applied.
+        now: a timestamp string, injected so tests are deterministic.
+
+    Returns:
+        The directory the copy was written to.
+    """
+    root = project / BACKUP_DIR
+    root.mkdir(exist_ok=True)
+    dest = root / f"{version}-{now}"
+    shutil.copytree(project / "megamaid", dest, ignore=shutil.ignore_patterns("__pycache__"))
+
+    for stale in sorted(root.iterdir())[:-RETAIN]:
+        shutil.rmtree(stale)
+    return dest
+
+
+def apply_plan(plan: ProjectPlan, runtime: pathlib.Path, version: str, now: str) -> pathlib.Path:
+    """Back up, then carry out a plan's adds and overwrites.
+
+    Refused files are not touched. `targets/`, `staging/`, `manifest.json`,
+    `.venv/` and `pyproject.toml` are never opened.
+
+    Args:
+        plan: from `plan_project`.
+        runtime: the current runtime source directory.
+        version: the runtime version being applied.
+        now: timestamp string, injected for determinism.
+
+    Returns:
+        The backup directory.
+
+    Raises:
+        ValueError: if the plan carries an error.
+    """
+    if plan.error:
+        raise ValueError(plan.error)
+
+    backup = back_up(plan.project, version, now)
+    for act in plan.actions:
+        if act.action == "refuse":
+            continue
+        shutil.copy2(runtime / act.name, plan.project / "megamaid" / act.name)
+    (plan.project / ".megamaid-version").write_text(version + "\n")
+    return backup
+
+
+def rollback(project: pathlib.Path) -> pathlib.Path:
+    """Restore the most recent backup.
+
+    Args:
+        project: the project directory.
+
+    Returns:
+        The backup that was restored.
+
+    Raises:
+        RuntimeError: MM-36 when there is no backup to restore.
+    """
+    root = project / BACKUP_DIR
+    backups = sorted(root.iterdir()) if root.is_dir() else []
+    if not backups:
+        raise RuntimeError(f"MM-36 no backup found in {root}")
+
+    newest = backups[-1]
+    shutil.rmtree(project / "megamaid")
+    shutil.copytree(newest, project / "megamaid")
+    return newest
