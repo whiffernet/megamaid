@@ -19,6 +19,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
@@ -622,6 +623,62 @@ def _exit_code(plans: list[ProjectPlan], failures: list[Path]) -> int:
     return 0
 
 
+def _preview_rollback(impl: ModuleType, projects: tuple[Path, ...]) -> int:
+    """Report what `--rollback` would restore, for each project, untouched.
+
+    Reads only `latest_backup()` — pure, a directory listing — and never
+    calls `impl.rollback()`, which is destructive (`shutil.rmtree` then
+    `shutil.copytree`). This is what makes `--dry-run --rollback` safe: the
+    write-performing call is never reached on this path, not merely skipped
+    by a flag check inside it.
+
+    Args:
+        impl: the lazily-imported `megamaid_setup.upgrade` module.
+        projects: project directories named on the command line.
+
+    Returns:
+        0 if every project has a backup to preview, 2 if any does not
+        (MM-36) — the same exit codes a real `--rollback` would give.
+    """
+    exit_code = 0
+    for p in projects:
+        newest = impl.latest_backup(p)
+        if newest is None:
+            click.echo(f"  x {p}: MM-36 no backup found in {p / impl.BACKUP_DIR}")
+            exit_code = 2
+            continue
+        timestamp, version = impl.parse_backup_name(newest.name)
+        file_count = sum(1 for f in newest.rglob("*") if f.is_file())
+        click.echo(
+            f"  would restore {p}/megamaid <- backup {timestamp} "
+            f"(version {version}, {file_count} files)"
+        )
+    click.echo("\n  Nothing written. Re-run without --dry-run.")
+    return exit_code
+
+
+def _do_rollback(impl: ModuleType, projects: tuple[Path, ...]) -> int:
+    """Actually restore each project's most recent backup.
+
+    Args:
+        impl: the lazily-imported `megamaid_setup.upgrade` module.
+        projects: project directories named on the command line.
+
+    Returns:
+        0 if every project restored cleanly, 2 if any raised (MM-36).
+    """
+    exit_code = 0
+    for p in projects:
+        try:
+            restored = impl.rollback(p)
+        except RuntimeError as exc:
+            click.echo(f"  x {p}: {exc}")
+            exit_code = 2
+        else:
+            click.echo(f"  restored {p} <- {restored}")
+    return exit_code
+
+
 @cli.command()
 @click.argument("projects", nargs=-1, required=True, type=click.Path(path_type=Path))
 @click.option("--dry-run", is_flag=True, help="Report what would change; write nothing.")
@@ -646,17 +703,14 @@ def upgrade(projects: tuple[Path, ...], dry_run: bool, do_rollback: bool, yes: b
         # Rollback needs neither a manifest nor a plan — it only reads
         # `.megamaid-backups/`. Keeping this branch independent means a
         # broken/missing manifest can never stand between a user and
-        # recovering from a bad upgrade.
-        failed = False
-        for p in projects:
-            try:
-                restored = impl.rollback(p)
-            except RuntimeError as exc:
-                click.echo(f"  x {p}: {exc}")
-                failed = True
-            else:
-                click.echo(f"  restored {p} <- {restored}")
-        raise SystemExit(2 if failed else 0)
+        # recovering from a bad upgrade. --dry-run is checked FIRST, right
+        # here, before either helper runs: _preview_rollback never calls the
+        # destructive impl.rollback(), so there is no path from
+        # `--dry-run --rollback` to a write, structurally, not by relying on
+        # a flag check inside the write path itself.
+        if dry_run:
+            raise SystemExit(_preview_rollback(impl, projects))
+        raise SystemExit(_do_rollback(impl, projects))
 
     runtime = Path(impl.__file__).resolve().parent.parent / "megamaid"
     manifest = load_manifest()
@@ -696,9 +750,24 @@ def upgrade(projects: tuple[Path, ...], dry_run: bool, do_rollback: bool, yes: b
             continue
         try:
             impl.apply_plan(plan, runtime, version, now)
-        except Exception as exc:
+        except impl.BackupFailed as exc:
+            # back_up() itself raised: apply_plan never reached the copy
+            # loop, so nothing in megamaid/ has been touched. Pointing this
+            # user at --rollback would be wrong — the backup it would
+            # restore may not exist, or may be a half-written copytree.
             click.echo(
-                f"  x {plan.project.name}: apply failed ({exc})\n"
+                f"  x {plan.project.name}: backup failed ({exc})\n"
+                f"     Nothing in megamaid/ was modified. Fix the underlying\n"
+                f"     problem (e.g. free disk space) and re-run upgrade."
+            )
+            failures.append(plan.project)
+        except Exception as exc:
+            # The backup completed (apply_plan calls it first and only
+            # reaches the copy loop after it returns), so megamaid/ may now
+            # be a mix of upgraded and pre-upgrade files, and a good,
+            # complete backup genuinely exists to restore from.
+            click.echo(
+                f"  x {plan.project.name}: apply failed after the backup completed ({exc})\n"
                 f"     megamaid/ may be left in a mixed state — some files upgraded,\n"
                 f"     some not. This does not self-heal. Recover with:\n"
                 f"       megamaid upgrade --rollback {plan.project}"

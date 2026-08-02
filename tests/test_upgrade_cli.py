@@ -11,6 +11,7 @@ still individually correct.
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import shutil
 import sys
@@ -30,6 +31,19 @@ def _snapshot(root: pathlib.Path) -> dict[pathlib.Path, tuple[int, int]]:
     """Every path under `root` mapped to (size, mtime_ns): a changed key set
     catches a stray mkdir/create, changed values catch a stray rewrite."""
     return {p: (p.stat().st_size, p.stat().st_mtime_ns) for p in sorted(root.rglob("*"))}
+
+
+def _hash_snapshot(root: pathlib.Path) -> dict[pathlib.Path, str]:
+    """Every file under `root` mapped to its sha256. Stronger than `_snapshot`:
+    proves content genuinely did not change, rather than inferring it from
+    size/mtime — the two of which could coincidentally line up (same size,
+    an mtime a filesystem doesn't record at high enough resolution) in a way
+    a swapped-in file of identical size would slip through undetected."""
+    return {
+        p: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
 
 
 def _project(tmp_path: pathlib.Path, name: str = "megamaid-proj") -> pathlib.Path:
@@ -197,6 +211,172 @@ def test_rollback_with_no_backup_reports_mm36_not_a_traceback(tmp_path):
     assert "MM-36" in result.output
     # A readable message, not a bare traceback: no exception class name leaked.
     assert "RuntimeError" not in result.output
+
+
+# --- --dry-run --rollback: the critical regression -------------------------
+#
+# The brief's own skeleton put the `do_rollback` branch ahead of the
+# `dry_run` check, with nothing inside it consulting `dry_run` at all — so
+# `--dry-run --rollback` fell straight through to the real, destructive
+# `impl.rollback()`: a hand edit sitting on top of a backup gets silently
+# replaced by that backup's older content, exit 0, no warning. Snapshotted
+# by content hash (not mtime/size, which a same-size restore could satisfy
+# coincidentally) specifically because that is what actually proves nothing
+# changed.
+
+
+def test_dry_run_rollback_writes_nothing_even_with_a_real_backup_present(tmp_path):
+    """Recreates the exact destructive scenario: apply once (creating a
+    backup that captures the refused file's *first* hand edit), then make a
+    *second* hand edit on top of it. A real rollback would blow the second
+    edit away and restore the first. --dry-run --rollback must touch none
+    of it."""
+    proj = _mixed_project(tmp_path)
+    apply_result = _run(["upgrade", str(proj)])
+    assert apply_result.exit_code == 1, apply_result.output
+    assert (proj / ".megamaid-backups").is_dir()
+
+    second_edit = "# a SECOND hand edit made after the backup exists\nx = 2\n"
+    (proj / "megamaid" / "cli.py").write_text(second_edit)
+
+    before = _hash_snapshot(tmp_path)
+    result = _run(["upgrade", "--dry-run", "--rollback", str(proj)])
+    after = _hash_snapshot(tmp_path)
+
+    assert before == after, "content changed under --dry-run --rollback"
+    assert (proj / "megamaid" / "cli.py").read_text() == second_edit
+    assert result.exit_code == 0, result.output
+    assert "would restore" in result.output
+    assert "Nothing written" in result.output
+
+
+def test_dry_run_rollback_names_the_backup_it_would_restore(tmp_path):
+    proj = _project(tmp_path)
+    apply_result = _run(["upgrade", str(proj)])
+    assert apply_result.exit_code == 0, apply_result.output
+
+    before = _hash_snapshot(tmp_path)
+    result = _run(["upgrade", "--dry-run", "--rollback", str(proj)])
+    after = _hash_snapshot(tmp_path)
+
+    assert before == after
+    assert result.exit_code == 0, result.output
+    assert "would restore" in result.output
+    assert str(proj) in result.output
+    # The backup dir's timestamp, parsed the same way the CLI itself does —
+    # so the preview is concrete (names an actual timestamp), not vague.
+    from megamaid_setup.upgrade import parse_backup_name
+
+    backup_dir = next((proj / ".megamaid-backups").iterdir())
+    timestamp, _version = parse_backup_name(backup_dir.name)
+    assert timestamp in result.output
+
+
+def test_dry_run_rollback_reports_mm36_when_there_is_no_backup(tmp_path):
+    proj = _project(tmp_path)  # never applied — nothing to roll back to
+
+    before = _hash_snapshot(tmp_path)
+    result = _run(["upgrade", "--dry-run", "--rollback", str(proj)])
+    after = _hash_snapshot(tmp_path)
+
+    assert before == after
+    assert result.exit_code == 2, result.output
+    assert "MM-36" in result.output
+    assert "Nothing written" in result.output
+
+
+# --- other flag combinations audited for a write reaching --dry-run --------
+
+
+def test_dry_run_with_yes_still_writes_nothing(tmp_path):
+    """--yes only ever suppresses the multi-project confirmation prompt; it
+    must never itself unlock a write when --dry-run is also set."""
+    a, b = _project(tmp_path, "a"), _project(tmp_path, "b")
+    before = _hash_snapshot(tmp_path)
+
+    result = _run(["upgrade", "--dry-run", "--yes", str(a), str(b)])
+
+    after = _hash_snapshot(tmp_path)
+    assert before == after
+    assert result.exit_code == 0, result.output
+
+
+def test_dry_run_rollback_with_multiple_projects_writes_nothing(tmp_path):
+    a, b = _mixed_project(tmp_path, "a"), _project(tmp_path, "b")
+    _run(["upgrade", str(a)])
+    _run(["upgrade", str(b)])
+    before = _hash_snapshot(tmp_path)
+
+    result = _run(["upgrade", "--dry-run", "--rollback", str(a), str(b)])
+
+    after = _hash_snapshot(tmp_path)
+    assert before == after
+    assert result.exit_code == 0, result.output
+    assert result.output.count("would restore") == 2
+
+
+# --- mid-apply failure: which phase, and does the recovery actually work ---
+
+
+def test_apply_failure_after_the_backup_completes_names_a_recovery_command_that_works(
+    tmp_path, monkeypatch
+):
+    """A failure in the copy loop, once back_up() has already finished: the
+    message must say "partially applied" (not "nothing modified"), name the
+    exact --rollback invocation, and that invocation must genuinely restore
+    the project — not just look plausible in the printed text."""
+    proj = _mixed_project(tmp_path)
+    before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+
+    real_copy2 = shutil.copy2
+    calls = {"n": 0}
+
+    def _flaky_copy2(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError(28, "No space left on device")
+        return real_copy2(src, dst, *a, **kw)
+
+    monkeypatch.setattr(shutil, "copy2", _flaky_copy2)
+    result = _run(["upgrade", str(proj)])
+    monkeypatch.undo()  # restore the real copy2 before touching the project again
+
+    assert result.exit_code == 2, result.output
+    assert "apply failed after the backup completed" in result.output
+    assert f"megamaid upgrade --rollback {proj}" in result.output
+    assert "Nothing in megamaid/ was modified" not in result.output
+
+    backups = sorted((proj / ".megamaid-backups").iterdir())
+    assert len(backups) == 1, "a complete backup must exist for the printed command to work"
+
+    rollback_result = _run(["upgrade", "--rollback", str(proj)])
+    assert rollback_result.exit_code == 0, rollback_result.output
+    after = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert after == before, "the exact command the CLI printed did not actually restore the project"
+
+
+def test_apply_failure_during_the_backup_itself_says_nothing_was_modified(tmp_path, monkeypatch):
+    """A failure inside back_up(), before the copy loop ever starts: the
+    message must say nothing was modified, and must NOT point at --rollback
+    — the backup that command would restore may not exist or be
+    incomplete."""
+    proj = _project(tmp_path)
+    before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+
+    def _raise(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(shutil, "copytree", _raise)
+    result = _run(["upgrade", str(proj)])
+    monkeypatch.undo()
+
+    assert result.exit_code == 2, result.output
+    assert "backup failed" in result.output
+    assert "Nothing in megamaid/ was modified" in result.output
+    assert "--rollback" not in result.output
+
+    after = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+    assert after == before
 
 
 # --- the vendored-cli.py guard ---------------------------------------------

@@ -164,6 +164,19 @@ BACKUP_DIR = ".megamaid-backups"
 RETAIN = 3
 
 
+class BackupFailed(Exception):
+    """`apply_plan` could not even finish making its safety copy.
+
+    Distinct from any exception raised once the copy loop has started: by
+    the time this can happen, `back_up()` has not returned, so nothing in
+    `megamaid/` has been overwritten yet, and the backup itself may not
+    exist or may be incomplete. A caller catching this specifically —
+    rather than a bare exception from `apply_plan` — knows the correct
+    answer is "nothing changed, fix the problem and retry", not "restore
+    from the backup that was just written."
+    """
+
+
 def back_up(project: pathlib.Path, version: str, now: str) -> pathlib.Path:
     """Copy the project's vendored runtime aside, then prune old backups.
 
@@ -214,11 +227,17 @@ def apply_plan(plan: ProjectPlan, runtime: pathlib.Path, version: str, now: str)
 
     Raises:
         ValueError: if the plan carries an error.
+        BackupFailed: if `back_up()` itself raises — nothing in `megamaid/`
+            has been touched yet when this happens.
     """
     if plan.error:
         raise ValueError(plan.error)
 
-    backup = back_up(plan.project, version, now)
+    try:
+        backup = back_up(plan.project, version, now)
+    except Exception as exc:
+        raise BackupFailed(str(exc)) from exc
+
     for act in plan.actions:
         if act.action == "refuse":
             continue
@@ -227,12 +246,59 @@ def apply_plan(plan: ProjectPlan, runtime: pathlib.Path, version: str, now: str)
     return backup
 
 
-def rollback(project: pathlib.Path) -> pathlib.Path:
-    """Restore the most recent backup.
+def latest_backup(project: pathlib.Path) -> pathlib.Path | None:
+    """The most recent backup directory for a project, or None if there is none.
+
+    Pure — only reads `.megamaid-backups/`'s directory listing, never writes
+    anything. This is what `rollback()` would restore, without restoring it;
+    shared by `rollback()` itself and by anything that only needs to preview
+    what a rollback would do (e.g. `upgrade --dry-run --rollback`).
 
     "Most recent" is determined by lexicographic sort of the backup directory
     names, which is chronological because `back_up()` names them
     `<now>-<version>` — timestamp first. See `back_up()`.
+
+    Args:
+        project: the project directory.
+
+    Returns:
+        The newest backup directory, or None when `.megamaid-backups` does
+        not exist or is empty.
+    """
+    root = project / BACKUP_DIR
+    backups = sorted(root.iterdir()) if root.is_dir() else []
+    return backups[-1] if backups else None
+
+
+def parse_backup_name(name: str) -> tuple[str, str]:
+    """Split a backup directory's basename back into (timestamp, version).
+
+    Names are `<now>-<version>`, where `now` is the fixed-width
+    `YYYYMMDD-HHMMSS` (15 characters) `back_up()` always produces. Splitting
+    at that fixed offset — rather than on the first or last `-` — is what
+    keeps this correct when `version` itself contains a `-` (a prerelease
+    tag like `1.0.0-rc1`), which is also why `back_up()` puts the timestamp
+    first in the name at all.
+
+    This is presentation only (used to describe a backup in a report), never
+    load-bearing for a read or write — `back_up()`/`rollback()` never parse
+    the name apart, only sort it as a whole string.
+
+    Args:
+        name: a backup directory's basename, as produced by `back_up()`.
+
+    Returns:
+        (timestamp, version). If `name` doesn't have a `-` at the expected
+        fixed offset — a name from some other source — returns (name, "")
+        rather than raising.
+    """
+    if len(name) > 16 and name[15] == "-":
+        return name[:15], name[16:]
+    return name, ""
+
+
+def rollback(project: pathlib.Path) -> pathlib.Path:
+    """Restore the most recent backup.
 
     Args:
         project: the project directory.
@@ -243,12 +309,10 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
     Raises:
         RuntimeError: MM-36 when there is no backup to restore.
     """
-    root = project / BACKUP_DIR
-    backups = sorted(root.iterdir()) if root.is_dir() else []
-    if not backups:
-        raise RuntimeError(f"MM-36 no backup found in {root}")
+    newest = latest_backup(project)
+    if newest is None:
+        raise RuntimeError(f"MM-36 no backup found in {project / BACKUP_DIR}")
 
-    newest = backups[-1]
     shutil.rmtree(project / "megamaid")
     shutil.copytree(newest, project / "megamaid")
     return newest
