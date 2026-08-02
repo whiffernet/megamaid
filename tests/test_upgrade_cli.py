@@ -113,9 +113,10 @@ def test_dry_run_on_a_non_project_writes_nothing_and_reports_mm31(tmp_path):
 
 
 def test_apply_upgrades_a_clean_project_and_exits_zero(tmp_path):
+    """A project already on today's exact runtime: every file classifies
+    EXACT -> overwrite, nothing is refused, and the apply still runs (a
+    same-content overwrite is a correct no-op, not something to special-case)."""
     proj = _project(tmp_path)
-    # Make it look like an old release so there is something to overwrite.
-    (proj / "megamaid" / "base.py").write_text("# old\n")
 
     result = _run(["upgrade", str(proj)])
 
@@ -123,6 +124,7 @@ def test_apply_upgrades_a_clean_project_and_exits_zero(tmp_path):
     assert (proj / "megamaid" / "base.py").read_bytes() == (RUNTIME / "base.py").read_bytes()
     assert (proj / ".megamaid-backups").is_dir()
     assert (proj / ".megamaid-version").exists()
+    assert "Applied to 1 project(s)" in result.output
 
 
 def test_apply_leaves_refused_files_alone_and_exits_one(tmp_path):
