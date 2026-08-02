@@ -121,9 +121,23 @@ That is the whole install. It registers the skill, the `/megamaid-doctor` comman
 
 On the MCP server's first start, a small virtualenv is built under
 `~/.local/state/megamaid/` (9–14 seconds depending on pip cache warmth; roughly 70 packages,
-no browser download). It is stamped with the plugin version _and a digest of the installed
-source_, so `claude plugin update megamaid` refreshes it automatically on the next start —
-including when a release ships without the version moving.
+no browser download).
+
+### Updating
+
+```bash
+claude plugin update megamaid@whiffernet
+```
+
+One command. It refreshes the marketplace and installs the new version; there is no separate
+`marketplace update` step. **The `@whiffernet` suffix is required** — the bare name fails with
+`Plugin "megamaid" not found`.
+
+The venv is stamped with the plugin version _and_ a digest of the installed source, so it
+rebuilds itself on the next start — about 9 seconds, once. The digest is what makes that
+reliable: keying on the version alone assumes the version always advances with the code, and
+when it did not, every install silently kept running the code it already had
+([#26](https://github.com/whiffernet/megamaid/issues/26)).
 
 ### Running megamaid commands
 
