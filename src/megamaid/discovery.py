@@ -9,82 +9,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import AsyncIterator
+from typing import TYPE_CHECKING
 
 import httpx
-from playwright.async_api import Page
+
+from .constants import DEFAULT_USER_AGENT
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
-
-# Browser-grade headers that bypass PerimeterX on sites like Walmart, Lululemon,
-# and AE. The Sec-Fetch-* set convinces PerimeterX that the request originated
-# from a real browser navigation, not a script. Effective on PerimeterX and
-# lighter Akamai/Imperva deployments; does NOT bypass Akamai Bot Manager
-# (which uses TLS fingerprinting) or sites requiring a real browser.
-_STEALTH_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-}
-
-
-@asynccontextmanager
-async def stealth_http_client(
-    base_url: str,
-    *,
-    timeout: float = 30.0,
-    extra_headers: dict | None = None,
-) -> AsyncIterator[httpx.AsyncClient]:
-    """Async context manager yielding an httpx client that bypasses PerimeterX.
-
-    Creates a client with browser-grade Sec-Fetch-* headers, then warms the
-    session by fetching the homepage. PerimeterX (and some lighter anti-bot
-    systems) require cookies set during a homepage visit before they permit
-    browse/API requests — skipping this step causes 4xx or redirect-to-CAPTCHA
-    responses even with correct headers.
-
-    Works on: Walmart, Lululemon, American Eagle, Williams-Sonoma.
-    Does NOT work on: sites using Akamai Bot Manager (TLS fingerprinting),
-    Kasada, or DataDome — those require a real browser or curl.
-
-    Args:
-        base_url: Site root URL (e.g. "https://www.walmart.com"). Fetched once
-            during warmup to seed session cookies.
-        timeout: Per-request timeout in seconds.
-        extra_headers: Additional headers to merge over the stealth defaults.
-
-    Yields:
-        A warmed httpx.AsyncClient ready for browse/API requests.
-
-    Example::
-
-        from megamaid.discovery import stealth_http_client
-
-        async with stealth_http_client("https://www.walmart.com") as client:
-            resp = await client.get("https://www.walmart.com/browse/toys/4171")
-    """
-    headers = {**_STEALTH_HEADERS, **(extra_headers or {})}
-    async with httpx.AsyncClient(
-        headers=headers,
-        follow_redirects=True,
-        timeout=timeout,
-    ) as client:
-        try:
-            await client.get(base_url)
-            logger.info("stealth_http_client: session warmed for %s", base_url)
-        except Exception as exc:
-            logger.warning("stealth_http_client: warmup failed for %s: %s", base_url, exc)
-        yield client
 
 
 @dataclass
@@ -320,7 +255,7 @@ async def sitemap_discovery(
         base_url: Site root URL (e.g. https://example.com).
         product_patterns: URL substrings to filter product pages.
         user_agent: Custom User-Agent header for sitemap requests.
-            Defaults to a Chrome-like UA string if not specified.
+            Defaults to ``megamaid.constants.DEFAULT_USER_AGENT`` if not specified.
         extract_images: If True, also parse ``<image:image>`` tags and
             return ``SitemapProduct`` objects instead of plain URL strings.
 
@@ -335,10 +270,7 @@ async def sitemap_discovery(
         product_patterns = ["/p/", "/product/", "/products/", "/dp/", "/ip/", "/pd/"]
 
     if user_agent is None:
-        user_agent = (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        )
+        user_agent = DEFAULT_USER_AGENT
 
     ns = {
         "sm": "http://www.sitemaps.org/schemas/sitemap/0.9",

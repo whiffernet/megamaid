@@ -51,7 +51,7 @@ class SitemapTarget(BaseScraper):
         return docs
 
     def _collect_urls(self, sitemap_url: str) -> list[tuple[str, str]]:
-        xml = httpx.get(sitemap_url, timeout=30.0).text
+        xml = httpx.get(sitemap_url, timeout=30.0, headers={"User-Agent": self.user_agent}).text
         root = ET.fromstring(xml)
         tag = root.tag.split("}", 1)[-1]
         out: list[tuple[str, str]] = []

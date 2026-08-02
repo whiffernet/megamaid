@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import httpx
 from playwright.async_api import Page
 
+from .constants import DEFAULT_USER_AGENT
 from .image_index import ImageIndex, cached_imageref
 from .models import ImageRef
 
@@ -333,7 +334,7 @@ async def download_images(
     dest_dir: Path,
     *,
     index: ImageIndex | None = None,
-    user_agent: str = "megamaid/0.1",
+    user_agent: str = DEFAULT_USER_AGENT,
     max_bytes: int = 10 * 1024 * 1024,
     min_bytes: int = 1024,
     max_count: int = 50,
