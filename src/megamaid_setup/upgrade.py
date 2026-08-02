@@ -589,7 +589,8 @@ def render(plans: list[ProjectPlan]) -> str:
     blocked = [(p, a) for p in plans for a in p.unreachable]
     if blocked:
         lines.append("")
-        lines.append(f"  {len(blocked)} added files cannot be invoked   [MM-35]")
+        noun = "file" if len(blocked) == 1 else "files"
+        lines.append(f"  {len(blocked)} added {noun} cannot be invoked   [MM-35]")
         for plan, act in blocked:
             entries = ", ".join(ENTRY_POINTS.get(act.name, ()))
             lines.append(f"    {plan.project.name}: {act.name} (needs {entries})")

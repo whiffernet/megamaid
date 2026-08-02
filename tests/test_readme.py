@@ -175,3 +175,49 @@ def test_the_documented_exclusion_is_not_stale(repo_root):
             f"{name} is excluded from the invocation guard but no longer exists; drop the exclusion"
         )
         assert name not in GUARDED_DOCS, f"{name} cannot be both guarded and excluded"
+
+
+# Report lines the root docs quote verbatim, with the grammar `render()`
+# actually produces. EXAMPLES.md carried "9 converges cleanly" and "1 added
+# files cannot be invoked" — neither string the program can emit. Quoted
+# output is a promise about what the reader will see, so it rots the same way
+# a path does, and the same way the retired-transport strings above did.
+_QUOTED_COUNT_LINE = re.compile(
+    r"^\s*(\d+) (project|projects|converge|converges|added file|added files)\b",
+    re.MULTILINE,
+)
+
+# Which spelling `render()` uses for each count. Singular is used iff n == 1.
+_SINGULAR = {"project", "converges", "added file"}
+_PLURAL = {"projects", "converge", "added files"}
+
+
+def test_quoted_report_lines_use_the_grammar_render_actually_emits(repo_root):
+    """A doc that quotes a count line must agree with `render()`'s own
+    pluralization, or it is showing the reader output the program cannot
+    produce.
+    """
+    offenders = []
+    for name in GUARDED_DOCS:
+        text = (repo_root / name).read_text()
+        for match in _QUOTED_COUNT_LINE.finditer(text):
+            count, word = int(match.group(1)), match.group(2)
+            singular = word in _SINGULAR
+            assert singular or word in _PLURAL, f"unclassified word {word!r}"
+            if singular != (count == 1):
+                offenders.append(f"{name}: {match.group(0).strip()!r}")
+
+    assert not offenders, "quoted report lines that render() would never print:\n" + "\n".join(
+        f"  - {o}" for o in offenders
+    )
+
+
+def test_the_quoted_line_guard_is_not_vacuous(repo_root):
+    """It must actually be matching the report blocks it claims to check."""
+    found = 0
+    for name in GUARDED_DOCS:
+        found += len(_QUOTED_COUNT_LINE.findall((repo_root / name).read_text()))
+    assert found >= 3, (
+        f"only {found} quoted count line(s) matched across {GUARDED_DOCS}; the pattern has "
+        "stopped finding the report blocks it is supposed to guard"
+    )

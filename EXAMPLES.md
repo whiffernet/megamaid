@@ -153,7 +153,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli upgrade --dry-run ~/mega
 
 ```
   12 projects
-  9 converges cleanly
+  9 converge cleanly
   3 have divergent files - upgraded around them
 
   4 file(s) refused - left exactly as found   [MM-32]
@@ -164,7 +164,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli upgrade --dry-run ~/mega
     -> review by hand: keep the edit, or replace it yourself if it should
        have been the runtime file all along.
 
-  71 file(s) replaced with the current runtime
+  39 file(s) replaced with the current runtime
     3 differed only in comments or formatting - that text
     was replaced. The originals are in .megamaid-backups/:
       megamaid-acehardware: __init__.py
@@ -174,13 +174,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli upgrade --dry-run ~/mega
   Files added
     netguard.py      -> 12
     constants.py     -> 12
-    recon.py         -> 8
+    recon.py         -> 9
 
-  1 added files cannot be invoked   [MM-35]
+  1 added file cannot be invoked   [MM-35]
     megamaid-walmart: recon.py (needs cli.py)
 
   Shared variants - candidates to backport upstream
-    images.py      2c94c206  x3   megamaid-macys megamaid-ulta megamaid-walmart
+    images.py      8af3a581  x3   megamaid-macys megamaid-ulta megamaid-walmart
 
   Nothing written. Re-run without --dry-run.
 ```
