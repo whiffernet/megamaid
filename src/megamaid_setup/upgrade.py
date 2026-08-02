@@ -165,6 +165,11 @@ BACKUP_DIR = ".megamaid-backups"
 #: How many previous runtimes to keep per project.
 RETAIN = 3
 
+#: The project-root file recording which runtime version the project is on.
+#: A copy rides inside each backup so `rollback()` can put the old one back —
+#: see `back_up()`.
+VERSION_STAMP = ".megamaid-version"
+
 #: Exactly the names `back_up()` produces: `YYYYMMDD-HHMMSS-<version>`.
 #: `.megamaid-backups/` is a plain directory in the user's project, so anything
 #: can be sitting in it — a note, an editor swapfile, a tarball parked there on
@@ -264,6 +269,14 @@ def back_up(project: pathlib.Path, version: str, now: str) -> pathlib.Path:
     sorts before `"0.9.1"` as a string), and may itself contain `-`
     (prerelease tags like `1.0.0-rc1`), so it cannot be the sort key.
 
+    The project's `.megamaid-version` stamp is copied in alongside the runtime,
+    because `apply_plan()` overwrites it and `rollback()` has to be able to put
+    the old value back. It lives *inside* the backup directory rather than
+    beside it so the retention prune carries it off with the backup it belongs
+    to; `rollback()` restores it to the project root and keeps it out of
+    `megamaid/`. A project with no stamp (one scaffolded before the stamping
+    scheme) records nothing, and rolls back to having none.
+
     Args:
         project: the project directory.
         version: the runtime version being applied.
@@ -289,6 +302,9 @@ def back_up(project: pathlib.Path, version: str, now: str) -> pathlib.Path:
     root.mkdir(exist_ok=True)
     dest = root / dest_name
     shutil.copytree(project / "megamaid", dest, ignore=shutil.ignore_patterns("__pycache__"))
+    stamp = project / VERSION_STAMP
+    if stamp.is_file():
+        shutil.copy2(stamp, dest / VERSION_STAMP)
 
     for stale in backups(project)[:-RETAIN]:
         shutil.rmtree(stale)
@@ -327,7 +343,7 @@ def apply_plan(plan: ProjectPlan, runtime: pathlib.Path, version: str, now: str)
         if act.action == "refuse":
             continue
         shutil.copy2(runtime / act.name, plan.project / "megamaid" / act.name)
-    (plan.project / ".megamaid-version").write_text(version + "\n")
+    (plan.project / VERSION_STAMP).write_text(version + "\n")
     return backup
 
 
@@ -361,6 +377,11 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
     exists to prevent. Staged-then-swapped, a restore either happens or does
     not, and a failure leaves the project exactly as it was found.
 
+    The project's `.megamaid-version` is reverted along with the runtime,
+    from the copy `back_up()` saved inside the backup. A stamp naming a
+    version the project is not running is silent and undetectable, and the
+    stamp is the only record of drift the scheme has.
+
     Args:
         project: the project directory.
 
@@ -381,10 +402,11 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
         shutil.rmtree(scratch, ignore_errors=True)
 
     # Stage. Everything that can go wrong goes wrong here, with megamaid/
-    # still untouched. __pycache__ is excluded because a backup written before
-    # back_up() started excluding it may still carry one.
+    # still untouched. VERSION_STAMP is excluded because it belongs at the
+    # project root, not inside the runtime; __pycache__ because a backup
+    # written before back_up() started excluding it may still carry one.
     try:
-        shutil.copytree(newest, staged, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(newest, staged, ignore=shutil.ignore_patterns("__pycache__", VERSION_STAMP))
     except Exception:
         shutil.rmtree(staged, ignore_errors=True)
         raise
@@ -402,6 +424,13 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
         raise
 
     shutil.rmtree(retired, ignore_errors=True)
+
+    saved_stamp = newest / VERSION_STAMP
+    live_stamp = project / VERSION_STAMP
+    if saved_stamp.is_file():
+        shutil.copy2(saved_stamp, live_stamp)
+    elif live_stamp.exists():
+        live_stamp.unlink()
     return newest
 
 

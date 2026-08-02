@@ -648,7 +648,12 @@ def _preview_rollback(impl: ModuleType, projects: tuple[Path, ...]) -> int:
             exit_code = 2
             continue
         timestamp, version = impl.parse_backup_name(newest.name)
-        file_count = sum(1 for f in newest.rglob("*") if f.is_file())
+        # The saved .megamaid-version stamp rides inside the backup but is
+        # restored to the project root, not into megamaid/ — counting it would
+        # promise one more runtime file than the restore actually writes.
+        file_count = sum(
+            1 for f in newest.rglob("*") if f.is_file() and f.name != impl.VERSION_STAMP
+        )
         click.echo(
             f"  would restore {p}/megamaid <- backup {timestamp} "
             f"(version {version}, {file_count} files)"

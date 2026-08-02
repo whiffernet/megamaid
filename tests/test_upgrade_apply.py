@@ -13,6 +13,7 @@ from megamaid_setup.manifest import load_manifest  # noqa: E402
 from megamaid_setup.upgrade import (  # noqa: E402
     BACKUP_DIR,
     RETAIN,
+    VERSION_STAMP,
     BackupFailed,
     apply_plan,
     back_up,
@@ -452,6 +453,58 @@ def test_rollback_does_not_restore_pycache_into_the_runtime(tmp_path):
     rollback(proj)
 
     assert not (proj / "megamaid" / "__pycache__").exists()
+
+
+# --- .megamaid-version: the stamp must not outlive the runtime it names ----
+
+
+def test_rollback_reverts_the_version_stamp(tmp_path):
+    """apply_plan writes .megamaid-version. A rollback that restores the old
+    runtime but leaves the new stamp makes the project claim a version it is
+    not running — silently, with nothing to detect it by."""
+    proj = _project(tmp_path)
+    (proj / VERSION_STAMP).write_text("0.8.4\n")
+
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+    assert (proj / VERSION_STAMP).read_text().strip() == "0.9.1"
+
+    rollback(proj)
+
+    assert (proj / VERSION_STAMP).read_text().strip() == "0.8.4", (
+        "the stamp still claims the version the rolled-back runtime is not running"
+    )
+
+
+def test_rollback_removes_the_stamp_when_the_project_never_had_one(tmp_path):
+    """A project scaffolded before the stamping scheme has no .megamaid-version
+    (SKILL.md step 3 says so). Rolling back to that state must leave it with
+    none, not with the stamp upgrade invented."""
+    proj = _project(tmp_path)
+    assert not (proj / VERSION_STAMP).exists()
+
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+    assert (proj / VERSION_STAMP).exists()
+
+    rollback(proj)
+
+    assert not (proj / VERSION_STAMP).exists(), (
+        "rollback invented a version stamp the project never had"
+    )
+
+
+def test_the_saved_stamp_is_not_restored_into_the_runtime_directory(tmp_path):
+    """The pre-upgrade stamp rides along inside the backup directory. It
+    belongs at the project root on restore, never inside megamaid/."""
+    proj = _project(tmp_path)
+    (proj / VERSION_STAMP).write_text("0.8.4\n")
+    plan = plan_project(proj, RUNTIME, load_manifest())
+    apply_plan(plan, RUNTIME, "0.9.1", "20260802-000000")
+
+    rollback(proj)
+
+    assert not (proj / "megamaid" / VERSION_STAMP).exists()
 
 
 # --- back_up() names what latest_backup() can find -------------------------
