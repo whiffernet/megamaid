@@ -102,3 +102,47 @@ def test_repeated_upgrades_do_not_compound(tmp_path):
     assert len(kept) == RETAIN
     counts = {len(list(b.rglob("*.py"))) for b in kept}
     assert len(counts) == 1, f"backups are compounding: {counts}"
+
+
+def test_rollback_picks_the_chronologically_newest_backup_across_a_version_bump(tmp_path):
+    """Version 0.10.0 sorts before 0.9.1 as a plain string: the char '1' sorts
+    below '9'. If backup directories were ordered by version, rollback would
+    restore the older release even though it was backed up first and a newer
+    one exists. Naming must sort by timestamp, not version, for
+    `sorted(...)[-1]` to mean "most recent"."""
+    proj = _project(tmp_path)
+
+    (proj / "megamaid" / "cli.py").write_text("# state at 0.9.1\n")
+    back_up(proj, "0.9.1", "20260101-000000")  # older release, backed up first
+
+    (proj / "megamaid" / "cli.py").write_text("# state at 0.10.0\n")
+    back_up(proj, "0.10.0", "20260601-000000")  # newer release, backed up second
+
+    (proj / "megamaid" / "cli.py").write_text("# live edit after both backups\n")
+
+    restored = rollback(proj)
+    assert restored.name.endswith("0.10.0"), f"restored the wrong backup: {restored.name}"
+    assert (proj / "megamaid" / "cli.py").read_text() == "# state at 0.10.0\n"
+
+
+def test_retention_prunes_the_chronologically_oldest_backup_across_a_version_bump(tmp_path):
+    """Same version-string sort trap, for back_up()'s retention prune: it must
+    drop the oldest backup by creation time, not whichever version string
+    happens to sort first."""
+    proj = _project(tmp_path)
+    releases = [
+        ("0.9.1", "20260101-000000"),  # oldest — must be pruned
+        ("0.9.2", "20260201-000000"),
+        ("0.10.0", "20260301-000000"),  # would sort FIRST as a string if version led
+        ("0.10.1", "20260401-000000"),  # newest
+    ]
+    for version, now in releases:
+        back_up(proj, version, now)
+
+    kept = sorted(p.name for p in (proj / BACKUP_DIR).iterdir())
+    assert len(kept) == RETAIN
+    assert not any(name.endswith("0.9.1") for name in kept), (
+        f"the chronologically oldest backup should have been pruned, got {kept}"
+    )
+    for version, _ in releases[1:]:
+        assert any(name.endswith(version) for name in kept), f"{version} missing from {kept}"

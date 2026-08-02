@@ -157,10 +157,17 @@ RETAIN = 3
 def back_up(project: pathlib.Path, version: str, now: str) -> pathlib.Path:
     """Copy the project's vendored runtime aside, then prune old backups.
 
-    The destination is `<project>/.megamaid-backups/<version>-<now>/`, a sibling
+    The destination is `<project>/.megamaid-backups/<now>-<version>/`, a sibling
     of `megamaid/`. Writing it inside `megamaid/` would mean the next backup
     swept up the previous one, and rollback would delete the directory it was
     about to read from.
+
+    The timestamp comes first in the directory name, not the version, so that
+    plain lexicographic sort — used both here and in `rollback()` — is also
+    chronological order. `now` is a fixed-width `YYYYMMDD-HHMMSS` string;
+    `version` is not fixed-width and does not sort chronologically (`"0.10.0"`
+    sorts before `"0.9.1"` as a string), and may itself contain `-`
+    (prerelease tags like `1.0.0-rc1`), so it cannot be the sort key.
 
     Args:
         project: the project directory.
@@ -172,7 +179,7 @@ def back_up(project: pathlib.Path, version: str, now: str) -> pathlib.Path:
     """
     root = project / BACKUP_DIR
     root.mkdir(exist_ok=True)
-    dest = root / f"{version}-{now}"
+    dest = root / f"{now}-{version}"
     shutil.copytree(project / "megamaid", dest, ignore=shutil.ignore_patterns("__pycache__"))
 
     for stale in sorted(root.iterdir())[:-RETAIN]:
@@ -212,6 +219,10 @@ def apply_plan(plan: ProjectPlan, runtime: pathlib.Path, version: str, now: str)
 
 def rollback(project: pathlib.Path) -> pathlib.Path:
     """Restore the most recent backup.
+
+    "Most recent" is determined by lexicographic sort of the backup directory
+    names, which is chronological because `back_up()` names them
+    `<now>-<version>` — timestamp first. See `back_up()`.
 
     Args:
         project: the project directory.
