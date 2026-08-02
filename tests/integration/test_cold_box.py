@@ -26,8 +26,19 @@ pytestmark = pytest.mark.skipif(
     reason="set MEGAMAID_COLD_BOX=1 to run the cold-box lane",
 )
 
-# MCP_TIMEOUT defaults to 30_000 ms and is a hard connect deadline. Gate well below it.
-CONNECT_BUDGET_SECONDS = 20.0
+# MCP_TIMEOUT defaults to 30_000 ms and is a hard connect deadline. Gate below it
+# with enough room that a slow runner is not mistaken for a regression.
+#
+# Raised from 20.0s on 2026-08-02. Real builds were landing at 20.5-21.3s across
+# three consecutive runs on a branch that changed no dependency and nothing on
+# the bootstrap import path — so the gate was reporting healthy builds as
+# failures, and the reds read as flakes. 25s keeps 5s of genuine headroom under
+# the platform ceiling.
+#
+# This raises the alarm threshold; it does not make the build faster. Why a cold
+# start costs ~21s at all is open — see issue #33. If that lands, lower this back
+# down rather than banking the slack.
+CONNECT_BUDGET_SECONDS = 25.0
 
 # Generous ceiling for the handshake to complete, covering a cold pip install;
 # unrelated to CONNECT_BUDGET_SECONDS, which is the gate the test asserts on.
