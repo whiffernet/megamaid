@@ -12,11 +12,14 @@ Commands:
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -25,6 +28,13 @@ import click
 from .image_index import ImageIndex
 from .manifest import Manifest, ManifestItem, compute_delta, get_latest_manifest
 from .models import slug_from_url
+
+if TYPE_CHECKING:
+    # megamaid_setup is not vendored into scraped projects (see `upgrade`
+    # below), so this import must never run at module scope for real — only
+    # mypy sees it, via `from __future__ import annotations` postponing
+    # evaluation of the annotations that use it.
+    from megamaid_setup.upgrade import ProjectPlan
 
 logging.basicConfig(
     level=logging.INFO,
@@ -562,6 +572,145 @@ def init() -> None:
         "megamaid suck --max 5   # dry-run\n"
         "megamaid suck           # full run\n"
     )
+
+
+def _sanitize_backup_component(value: str, label: str) -> str:
+    """Refuse a version/timestamp string that could escape `.megamaid-backups`.
+
+    `back_up()` joins its destination as `<project>/.megamaid-backups/<now>-<version>`
+    with no validation of its own (by design — it is not the layer that owns
+    untrusted input). The CLI is the only place these two strings originate,
+    so it is the layer responsible for keeping them inside that directory.
+
+    Args:
+        value: the raw string headed into the backup directory name.
+        label: which argument this is, used only in the error message.
+
+    Returns:
+        value, unchanged, once it has been proven safe.
+
+    Raises:
+        SystemExit: if value is empty or could traverse outside the backup
+            directory (a path separator or a `..` segment).
+    """
+    if not value or os.sep in value or (os.altsep and os.altsep in value) or ".." in value:
+        raise SystemExit(f"  x refusing unsafe {label} {value!r}: would escape .megamaid-backups")
+    return value
+
+
+def _exit_code(plans: list[ProjectPlan], failures: list[Path]) -> int:
+    """Map a batch of plans, plus any apply-time failures, to a process exit code.
+
+    Three outcomes a calling script can tell apart:
+        0 — every project converges cleanly (or, on --dry-run, would).
+        1 — nothing crashed, but at least one project has a refused file or
+            an unreachable add that needs a human decision.
+        2 — a project could not even be read, or an apply/rollback call
+            actually raised.
+
+    Args:
+        plans: the plans that were reported.
+        failures: projects whose `apply_plan()` call raised.
+
+    Returns:
+        The process exit code.
+    """
+    if failures or any(p.error for p in plans):
+        return 2
+    if any(not p.converges for p in plans):
+        return 1
+    return 0
+
+
+@cli.command()
+@click.argument("projects", nargs=-1, required=True, type=click.Path(path_type=Path))
+@click.option("--dry-run", is_flag=True, help="Report what would change; write nothing.")
+@click.option("--rollback", "do_rollback", is_flag=True, help="Restore the most recent backup.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation when several projects match.")
+def upgrade(projects: tuple[Path, ...], dry_run: bool, do_rollback: bool, yes: bool) -> None:
+    """Converge scaffolded projects onto the current runtime.
+
+    Runs from the installed plugin, not from inside a scraped project — the
+    implementation is not vendored.
+    """
+    try:
+        from megamaid_setup import upgrade as impl
+        from megamaid_setup.manifest import load_manifest
+    except ImportError:
+        raise SystemExit(
+            "  x `upgrade` runs from the megamaid plugin, not from inside a project.\n"
+            '     Use:  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/launch.py" --cli upgrade ...'
+        )
+
+    if do_rollback:
+        # Rollback needs neither a manifest nor a plan — it only reads
+        # `.megamaid-backups/`. Keeping this branch independent means a
+        # broken/missing manifest can never stand between a user and
+        # recovering from a bad upgrade.
+        failed = False
+        for p in projects:
+            try:
+                restored = impl.rollback(p)
+            except RuntimeError as exc:
+                click.echo(f"  x {p}: {exc}")
+                failed = True
+            else:
+                click.echo(f"  restored {p} <- {restored}")
+        raise SystemExit(2 if failed else 0)
+
+    runtime = Path(impl.__file__).resolve().parent.parent / "megamaid"
+    manifest = load_manifest()
+    plans = [impl.plan_project(p, runtime, manifest) for p in projects]
+
+    click.echo(impl.render(plans))
+
+    if dry_run:
+        click.echo("\n  Nothing written. Re-run without --dry-run.")
+        raise SystemExit(_exit_code(plans, []))
+
+    if len(projects) > 1 and not yes:
+        click.confirm(f"\n  Apply to {len(projects)} projects?", abort=True)
+
+    # The version tag that lands in each backup's directory name and in
+    # `.megamaid-version`. `importlib.metadata` reads it straight from the
+    # installed distribution — built from `.claude-plugin/VERSION.txt` at
+    # package-build time — so it works the same way whether this command is
+    # running from the launcher's state venv or an editable dev install,
+    # with no assumption about where the plugin's repo checkout lives. If
+    # the package metadata is unavailable (e.g. running from a raw source
+    # checkout that was never pip-installed), fall back to the manifest's
+    # own commit — already loaded above, and already unique per release.
+    try:
+        version = importlib.metadata.version("megamaid")
+    except importlib.metadata.PackageNotFoundError:
+        version = manifest.generated_from
+    version = _sanitize_backup_component(version, "version")
+    now = _sanitize_backup_component(
+        datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"), "timestamp"
+    )
+
+    failures: list[Path] = []
+    for plan in plans:
+        if plan.error:
+            click.echo(f"  skipped {plan.project.name}: {plan.error}")
+            continue
+        try:
+            impl.apply_plan(plan, runtime, version, now)
+        except Exception as exc:
+            click.echo(
+                f"  x {plan.project.name}: apply failed ({exc})\n"
+                f"     megamaid/ may be left in a mixed state — some files upgraded,\n"
+                f"     some not. This does not self-heal. Recover with:\n"
+                f"       megamaid upgrade --rollback {plan.project}"
+            )
+            failures.append(plan.project)
+
+    applied = sum(1 for p in plans if not p.error) - len(failures)
+    click.echo(f"\n  Applied to {applied} project(s).")
+    if failures:
+        click.echo(f"  {len(failures)} project(s) failed mid-apply - see above to recover.")
+
+    raise SystemExit(_exit_code(plans, failures))
 
 
 if __name__ == "__main__":

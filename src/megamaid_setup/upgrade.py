@@ -13,6 +13,7 @@ real projects without risk.
 from __future__ import annotations
 
 import ast
+import collections
 import enum
 import hashlib
 import pathlib
@@ -251,3 +252,106 @@ def rollback(project: pathlib.Path) -> pathlib.Path:
     shutil.rmtree(project / "megamaid")
     shutil.copytree(newest, project / "megamaid")
     return newest
+
+
+def shared_variants(
+    plans: list[ProjectPlan], contents: dict[tuple[str, str], list[str]] | None = None
+) -> dict[tuple[str, str], list[str]]:
+    """Group refused files by (filename, content hash) across projects.
+
+    A variant appearing in several independent projects is not several hand
+    edits — it is template work done in a project that never flowed upstream.
+    Surfacing it turns N project decisions into one backport review.
+
+    Args:
+        plans: the planned projects.
+        contents: pre-computed mapping, injected by tests. When None, hashes are
+            read from disk.
+
+    Returns:
+        {(filename, short-hash): [project names]} for variants shared by 2+.
+    """
+    if contents is None:
+        contents = collections.defaultdict(list)
+        for plan in plans:
+            for act in plan.refused:
+                path = plan.project / "megamaid" / act.name
+                if path.is_file():
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+                    contents[(act.name, digest)].append(plan.project.name)
+    return {k: v for k, v in contents.items() if len(v) > 1}
+
+
+def render(plans: list[ProjectPlan]) -> str:
+    """Turn plans into the report a human reads.
+
+    Refusals lead the report, ahead of everything upgrade actually did. The
+    asymmetry that drives this whole design — overwriting a hand edit is
+    unrecoverable in spirit, skipping a file only costs an explanation — means
+    a refusal is the headline, never a number folded into a summary line.
+
+    Args:
+        plans: one `ProjectPlan` per project passed on the command line.
+
+    Returns:
+        The full text report, ready to print.
+    """
+    ok = [p for p in plans if p.converges and not p.error]
+    dirty = [p for p in plans if p.refused]
+    errored = [p for p in plans if p.error]
+
+    lines = [f"  {len(plans)} projects"]
+    lines.append(f"  {len(ok)} converge cleanly")
+    if dirty:
+        lines.append(f"  {len(dirty)} have divergent files - upgraded around them")
+    if errored:
+        lines.append(f"  {len(errored)} could not be read")
+
+    if errored:
+        lines.append("")
+        lines.append("  Could not be read")
+        for plan in errored:
+            lines.append(f"    {plan.project.name}: {plan.error}")
+
+    # Refusals first, in full, with the file name and the project it belongs
+    # to — never just a count. This is what a human has to act on.
+    refusals = [(p, a) for p in plans for a in p.refused]
+    if refusals:
+        lines.append("")
+        lines.append(f"  {len(refusals)} file(s) refused - left exactly as found   [MM-32]")
+        for plan, act in refusals:
+            lines.append(
+                f"    {plan.project.name}: {act.name}  (diverges from every known release)"
+            )
+        lines.append("    -> review by hand: keep the edit, or replace it yourself if it should")
+        lines.append("       have been the runtime file all along.")
+
+    adds: collections.Counter = collections.Counter()
+    for plan in plans:
+        for act in plan.actions:
+            if act.action == "add":
+                adds[act.name] += 1
+    if adds:
+        lines.append("")
+        lines.append("  Files added")
+        for name, count in sorted(adds.items(), key=lambda kv: -kv[1]):
+            lines.append(f"    {name:<16} -> {count}")
+
+    blocked = [(p, a) for p in plans for a in p.unreachable]
+    if blocked:
+        lines.append("")
+        lines.append(f"  {len(blocked)} added files cannot be invoked   [MM-35]")
+        for plan, act in blocked:
+            entries = ", ".join(ENTRY_POINTS.get(act.name, ()))
+            lines.append(f"    {plan.project.name}: {act.name} (needs {entries})")
+
+    variants = shared_variants(plans)
+    if variants:
+        lines.append("")
+        lines.append("  Shared variants - candidates to backport upstream")
+        for (name, digest), projects in sorted(variants.items(), key=lambda kv: -len(kv[1])):
+            lines.append(
+                f"    {name:<14} {digest}  x{len(projects):<3} {' '.join(sorted(projects))}"
+            )
+
+    return "\n".join(lines)
