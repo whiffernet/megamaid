@@ -14,13 +14,13 @@ KNOWN_HASH = "9d4a8a4b6a2d1e1c9c1f0a8f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b"
 
 
 def _manifest(tmp_path):
-    """A manifest containing exactly one known file: KNOWN_SOURCE."""
+    """A manifest whose only history is KNOWN_SOURCE, recorded under "a.py"."""
     import ast
     import hashlib
 
     return Manifest(
-        hashes=frozenset({hashlib.sha256(KNOWN_SOURCE.encode()).hexdigest()}),
-        asts=frozenset({ast.dump(ast.parse(KNOWN_SOURCE))}),
+        hashes={"a.py": frozenset({hashlib.sha256(KNOWN_SOURCE.encode()).hexdigest()})},
+        asts={"a.py": frozenset({ast.dump(ast.parse(KNOWN_SOURCE))})},
         generated_from="deadbeef",
     )
 
@@ -67,4 +67,22 @@ def test_undecodable_bytes_are_divergent(tmp_path):
     from ast.parse's SyntaxError. Both land on DIVERGENT, never a crash."""
     f = tmp_path / "a.py"
     f.write_bytes(b"x = '\xff\xfe not valid utf-8'\n")
+    assert classify(f, _manifest(tmp_path)) is Tier.DIVERGENT
+
+
+def test_matching_content_under_a_different_filename_is_divergent(tmp_path):
+    """The manifest is keyed by filename. Byte- or AST-identical content
+    recorded under a *different* file's history must not vouch for this one —
+    otherwise a historically-empty __init__.py would excuse an edited cli.py
+    that happens to reduce to the same bytes or the same empty AST."""
+    f = tmp_path / "b.py"
+    f.write_text(KNOWN_SOURCE)
+    assert classify(f, _manifest(tmp_path)) is Tier.DIVERGENT
+
+
+def test_unknown_filename_is_divergent_not_a_crash(tmp_path):
+    """A filename the manifest has no history for at all must not raise —
+    an empty lookup, not a KeyError, and it lands on DIVERGENT."""
+    f = tmp_path / "never-seen.py"
+    f.write_text("# anything\n")
     assert classify(f, _manifest(tmp_path)) is Tier.DIVERGENT

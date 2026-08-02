@@ -31,18 +31,30 @@ def _git(repo_root: pathlib.Path, *args: str) -> bytes:
     return subprocess.run(["git", *args], cwd=repo_root, capture_output=True, check=True).stdout
 
 
+def _total(by_file: dict[str, list[str]]) -> int:
+    """Sum of per-file counts, for human-readable reporting only."""
+    return sum(len(v) for v in by_file.values())
+
+
 def build_manifest(repo_root: pathlib.Path) -> dict:
     """Collect every historical sha256 and ast.dump of the runtime modules.
+
+    Keyed per filename basename, not a flat pool: a match must be against that
+    *same* file's own history, or an empty historical `__init__.py` ends up
+    vouching for any other file that has been reduced to a comment. The rename
+    from templates/megamaid/ to src/megamaid/ still folds into one key, since
+    both paths' basenames land in the same dict entry.
 
     Args:
         repo_root: the repository root (must be a git checkout).
 
     Returns:
-        {"generated_from": <head sha>, "hashes": [...], "asts": [...]} with both
-        lists sorted, so the output is deterministic and diffable.
+        {"generated_from": <head sha>, "hashes": {filename: [...]}, "asts":
+        {filename: [...]}} with keys and value lists sorted, so the output is
+        deterministic and diffable.
     """
-    hashes: set[str] = set()
-    asts: set[str] = set()
+    hashes: dict[str, set[str]] = {}
+    asts: dict[str, set[str]] = {}
 
     for commit in _git(repo_root, "rev-list", "--all").decode().split():
         for base in RUNTIME_PATHS:
@@ -51,17 +63,22 @@ def build_manifest(repo_root: pathlib.Path) -> dict:
                 parts = line.split()
                 if len(parts) < 4 or parts[1] != "blob":
                     continue
+                name = pathlib.PurePosixPath(parts[3]).name
                 blob = _git(repo_root, "cat-file", "blob", parts[2])
-                hashes.add(hashlib.sha256(blob).hexdigest())
+                hashes.setdefault(name, set()).add(hashlib.sha256(blob).hexdigest())
                 try:
-                    asts.add(ast.dump(ast.parse(blob.decode())))
+                    asts.setdefault(name, set()).add(ast.dump(ast.parse(blob.decode())))
                 except (SyntaxError, UnicodeDecodeError):
                     # A historical file that no longer parses is still a valid
                     # hash match; it just cannot contribute an AST.
                     pass
 
     head = _git(repo_root, "rev-parse", "HEAD").decode().strip()
-    return {"generated_from": head, "hashes": sorted(hashes), "asts": sorted(asts)}
+    return {
+        "generated_from": head,
+        "hashes": {name: sorted(vals) for name, vals in sorted(hashes.items())},
+        "asts": {name: sorted(vals) for name, vals in sorted(asts.items())},
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,8 +98,10 @@ def main(argv: list[str] | None = None) -> int:
         if committed.get("hashes") != fresh["hashes"] or committed.get("asts") != fresh["asts"]:
             print(
                 f"{MANIFEST} is stale.\n"
-                f"  committed: {len(committed.get('hashes', []))} hashes\n"
-                f"  from HEAD: {len(fresh['hashes'])} hashes\n"
+                f"  committed: {_total(committed.get('hashes', {}))} hashes across "
+                f"{len(committed.get('hashes', {}))} files\n"
+                f"  from HEAD: {_total(fresh['hashes'])} hashes across "
+                f"{len(fresh['hashes'])} files\n"
                 f"Regenerate with: python3 scripts/build_known_hashes.py",
                 file=sys.stderr,
             )
@@ -91,7 +110,10 @@ def main(argv: list[str] | None = None) -> int:
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(fresh, indent=2) + "\n")
-    print(f"wrote {MANIFEST}: {len(fresh['hashes'])} hashes, {len(fresh['asts'])} ASTs")
+    print(
+        f"wrote {MANIFEST}: {_total(fresh['hashes'])} hashes, {_total(fresh['asts'])} ASTs, "
+        f"across {len(fresh['hashes'])} files"
+    )
     return 0
 
 

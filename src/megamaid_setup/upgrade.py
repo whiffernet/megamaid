@@ -73,6 +73,11 @@ class ProjectPlan:
 def classify(path: pathlib.Path, manifest: Manifest) -> Tier:
     """Decide whether this file may be replaced.
 
+    Lookups are scoped to `path.name`: a match only counts against that same
+    file's own history, never another runtime file's. A filename the manifest
+    has never seen has no historical versions to match, so it falls straight
+    through to DIVERGENT rather than crashing or matching by accident.
+
     Args:
         path: a file inside a project's vendored `megamaid/` directory.
         manifest: the historical record from `load_manifest()`.
@@ -80,17 +85,21 @@ def classify(path: pathlib.Path, manifest: Manifest) -> Tier:
     Returns:
         ABSENT if it does not exist, EXACT on a sha256 match, COSMETIC when only
         formatting or comments differ, DIVERGENT otherwise — including files that
-        do not parse, which are never overwritten silently.
+        do not parse, and files with no history under this name at all, which
+        are never overwritten silently.
     """
     if not path.is_file():
         return Tier.ABSENT
 
+    known_hashes = manifest.hashes.get(path.name, frozenset())
+    known_asts = manifest.asts.get(path.name, frozenset())
+
     raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() in manifest.hashes:
+    if hashlib.sha256(raw).hexdigest() in known_hashes:
         return Tier.EXACT
 
     try:
-        if ast.dump(ast.parse(raw.decode())) in manifest.asts:
+        if ast.dump(ast.parse(raw.decode())) in known_asts:
             return Tier.COSMETIC
     except (SyntaxError, UnicodeDecodeError):
         return Tier.DIVERGENT
