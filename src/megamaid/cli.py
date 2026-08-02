@@ -30,6 +30,8 @@ import importlib.metadata
 import json
 import logging
 import os
+import shlex
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -613,6 +615,38 @@ def _sanitize_backup_component(value: str, label: str) -> str:
     return value
 
 
+def _recovery_command(project: Path) -> str:
+    """The exact `--rollback` command line that recovers this project.
+
+    This is printed at the one moment the feature can leave a project's
+    `megamaid/` half-written, so it has to be pasteable as it stands, not
+    illustrative. Two things it must not be:
+
+    - **Bare.** `claude plugin install` puts nothing on PATH, so a literal
+      `megamaid upgrade --rollback …` is not runnable for most callers. Echoing
+      back the executable this process was actually started from is correct
+      however the reader got here — the launcher's state venv, a symlink they
+      made themselves, or a scraped project's own `.venv/bin/megamaid`.
+    - **Relative.** The project path arrives from argv and may be relative to a
+      directory the reader is no longer in by the time they paste this, which
+      would either error or act on the wrong directory.
+
+    Both parts are shell-quoted, so a path containing a space survives the
+    round trip.
+
+    Args:
+        project: the project directory that was partially upgraded.
+
+    Returns:
+        A single command line, ready to paste.
+    """
+    launched_as = shutil.which(sys.argv[0]) or sys.argv[0]
+    return (
+        f"{shlex.quote(os.path.abspath(launched_as))} upgrade --rollback "
+        f"{shlex.quote(str(project.resolve()))}"
+    )
+
+
 def _exit_code(plans: list[ProjectPlan], failures: list[Path]) -> int:
     """Map a batch of plans, plus any apply-time failures, to a process exit code.
 
@@ -794,7 +828,7 @@ def upgrade(projects: tuple[Path, ...], dry_run: bool, do_rollback: bool, yes: b
                 f"  x {plan.project.name}: apply failed after the backup completed ({exc})\n"
                 f"     megamaid/ may be left in a mixed state — some files upgraded,\n"
                 f"     some not. This does not self-heal. Recover with:\n"
-                f"       megamaid upgrade --rollback {plan.project}"
+                f"       {_recovery_command(plan.project)}"
             )
             failures.append(plan.project)
 

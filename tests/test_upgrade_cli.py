@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import pathlib
+import shlex
 import shutil
 import sys
 
@@ -44,6 +45,21 @@ def _hash_snapshot(root: pathlib.Path) -> dict[pathlib.Path, str]:
         for p in sorted(root.rglob("*"))
         if p.is_file()
     }
+
+
+def _printed_recovery_command(output: str) -> str:
+    """The command line the mid-apply failure message told the user to run.
+
+    Pulled out of the real output rather than reconstructed, so the test can
+    execute what was actually printed. The line following "Recover with:" is
+    the command and nothing else — that shape is the contract this asserts.
+    """
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
+        if line.rstrip().endswith("Recover with:"):
+            assert index + 1 < len(lines), f"'Recover with:' names no command:\n{output}"
+            return lines[index + 1].strip()
+    raise AssertionError(f"no 'Recover with:' line in the failure message:\n{output}")
 
 
 def _project(tmp_path: pathlib.Path, name: str = "megamaid-proj") -> pathlib.Path:
@@ -324,7 +340,16 @@ def test_apply_failure_after_the_backup_completes_names_a_recovery_command_that_
     """A failure in the copy loop, once back_up() has already finished: the
     message must say "partially applied" (not "nothing modified"), name the
     exact --rollback invocation, and that invocation must genuinely restore
-    the project — not just look plausible in the printed text."""
+    the project — not just look plausible in the printed text.
+
+    The printed line is parsed with shlex and its arguments are handed
+    straight to the runner, so what is executed here *is* what was printed.
+    Completeness is asserted on the parsed tokens rather than by substring,
+    because the two ways this line can be wrong are both invisible to a
+    substring check: a bare `megamaid …`, which is not on PATH after a plugin
+    install and so cannot run at all, and a relative project path, which
+    silently resolves against whatever directory the reader happens to be in
+    when they paste it."""
     proj = _mixed_project(tmp_path)
     before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
 
@@ -343,16 +368,51 @@ def test_apply_failure_after_the_backup_completes_names_a_recovery_command_that_
 
     assert result.exit_code == 2, result.output
     assert "apply failed after the backup completed" in result.output
-    assert f"megamaid upgrade --rollback {proj}" in result.output
     assert "Nothing in megamaid/ was modified" not in result.output
+
+    printed = _printed_recovery_command(result.output)
+    executable, *arguments = shlex.split(printed)
+
+    assert pathlib.Path(executable).is_absolute(), (
+        f"the recovery command names {executable!r}, which is not a runnable path — a plugin "
+        f"install puts nothing on PATH, so a bare invocation cannot be pasted: {printed!r}"
+    )
+    assert arguments == ["upgrade", "--rollback", str(proj.resolve())], (
+        f"the recovery command is incomplete or does not name the project by absolute path: "
+        f"{printed!r}"
+    )
 
     backups = sorted((proj / ".megamaid-backups").iterdir())
     assert len(backups) == 1, "a complete backup must exist for the printed command to work"
 
-    rollback_result = _run(["upgrade", "--rollback", str(proj)])
+    # Run what was printed. The runner stands in for the executable token;
+    # every argument after it is the printed line's own, unmodified.
+    rollback_result = _run(arguments)
     assert rollback_result.exit_code == 0, rollback_result.output
     after = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
     assert after == before, "the exact command the CLI printed did not actually restore the project"
+
+
+def test_the_recovery_command_is_quoted_for_a_path_containing_a_space(tmp_path, monkeypatch):
+    """Project directories live wherever the user put them. An unquoted path
+    with a space in it parses as two arguments and the paste fails."""
+    proj = _mixed_project(tmp_path, "mega maid spaced")
+
+    real_copy2 = shutil.copy2
+    calls = {"n": 0}
+
+    def _flaky_copy2(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError(28, "No space left on device")
+        return real_copy2(src, dst, *a, **kw)
+
+    monkeypatch.setattr(shutil, "copy2", _flaky_copy2)
+    result = _run(["upgrade", str(proj)])
+    monkeypatch.undo()
+
+    _, *arguments = shlex.split(_printed_recovery_command(result.output))
+    assert arguments == ["upgrade", "--rollback", str(proj.resolve())]
 
 
 def test_apply_failure_during_the_backup_itself_says_nothing_was_modified(tmp_path, monkeypatch):
