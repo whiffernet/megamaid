@@ -349,9 +349,24 @@ def test_apply_failure_after_the_backup_completes_names_a_recovery_command_that_
     substring check: a bare `megamaid …`, which is not on PATH after a plugin
     install and so cannot run at all, and a relative project path, which
     silently resolves against whatever directory the reader happens to be in
-    when they paste it."""
+    when they paste it.
+
+    Everything is typed *relatively* here — `./megamaid upgrade megamaid-mixed`
+    from the parent directory — which is what makes those two assertions bite.
+    Run with an already-absolute `tmp_path` and an absolute `sys.argv[0]`, they
+    pass whether or not `_recovery_command()` absolutises anything, so removing
+    either `.resolve()` or `os.path.abspath()` leaves the test green and the
+    guard is decorative. With a relative cwd-dependent invocation, removing
+    either one turns it red."""
     proj = _mixed_project(tmp_path)
     before = {p.name: p.read_bytes() for p in (proj / "megamaid").glob("*.py")}
+
+    # `cd <parent> && ./megamaid upgrade megamaid-mixed`
+    launched_as = tmp_path / "megamaid"
+    launched_as.write_text("#!/bin/sh\n")
+    launched_as.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["./megamaid", "upgrade", proj.name])
 
     real_copy2 = shutil.copy2
     calls = {"n": 0}
@@ -363,7 +378,7 @@ def test_apply_failure_after_the_backup_completes_names_a_recovery_command_that_
         return real_copy2(src, dst, *a, **kw)
 
     monkeypatch.setattr(shutil, "copy2", _flaky_copy2)
-    result = _run(["upgrade", str(proj)])
+    result = _run(["upgrade", proj.name])  # relative, as the user typed it
     monkeypatch.undo()  # restore the real copy2 before touching the project again
 
     assert result.exit_code == 2, result.output
@@ -375,7 +390,8 @@ def test_apply_failure_after_the_backup_completes_names_a_recovery_command_that_
 
     assert pathlib.Path(executable).is_absolute(), (
         f"the recovery command names {executable!r}, which is not a runnable path — a plugin "
-        f"install puts nothing on PATH, so a bare invocation cannot be pasted: {printed!r}"
+        f"install puts nothing on PATH, and a cwd-relative path breaks the moment the reader "
+        f"is somewhere else: {printed!r}"
     )
     assert arguments == ["upgrade", "--rollback", str(proj.resolve())], (
         f"the recovery command is incomplete or does not name the project by absolute path: "
