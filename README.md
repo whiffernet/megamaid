@@ -253,7 +253,7 @@ which leaves nothing on screen but "Failed to connect".
 The server is a normal console script, so any MCP client can spawn it over stdio:
 
 ```bash
-pipx install "git+https://github.com/whiffernet/megamaid@v0.11.0#egg=megamaid[mcp]"
+pipx install "git+https://github.com/whiffernet/megamaid@v0.11.1#egg=megamaid[mcp]"
 megamaid-mcp
 ```
 
