@@ -47,6 +47,17 @@ dev = [
 megamaid = "megamaid.cli:cli"
 megamaid-mcp = "megamaid_mcp.server:main"
 
+[tool.ruff]
+# Fleet convention (8 of 9 repos): 100 columns.
+line-length = 100
+
+[tool.ruff.lint]
+# Explicit rule set, NOT ruff's default. With no `select`, the lint contract is
+# whatever ruff currently defaults to, and that moved from 59 rules in 0.15 to
+# 413 in 0.16 — turning CI red on main with no code change. See
+# whiffernet/spark-ops#32 and whiffernet/loop-engine#163.
+select = ["E", "F", "I", "W"]
+
 [tool.setuptools.dynamic]
 version = { file = ".claude-plugin/VERSION.txt" }
 
